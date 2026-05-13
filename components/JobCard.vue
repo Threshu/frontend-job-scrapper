@@ -1,0 +1,322 @@
+<script setup lang="ts">
+import type { GroupDto } from '~~/server/api/groups/index.get'
+import { STATUSES, STATUS_LABEL, type Status } from '~/composables/useJobs'
+
+const props = defineProps<{ group: GroupDto }>()
+const { setStatus, setNotes } = useJobs()
+
+const expanded = ref(false)
+const notesDraft = ref(props.group.notes)
+const savingNotes = ref(false)
+
+const SOURCE_LABEL: Record<string, string> = {
+  justjoin: 'JJIT',
+  nofluffjobs: 'NFJ',
+  theprotocol: 'tP',
+  bulldogjob: 'BD',
+  rocketjobs: 'RJ',
+  pracuj: 'Pracuj',
+  linkedin: 'LI',
+  indeed: 'Indeed',
+}
+
+function fmtSalary(g: GroupDto) {
+  const s = g.bestSalary
+  if (!s) return null
+  const cur = s.currency ?? ''
+  if (s.min && s.max) return `${s.min.toLocaleString('pl-PL')}–${s.max.toLocaleString('pl-PL')} ${cur}`
+  if (s.max) return `do ${s.max.toLocaleString('pl-PL')} ${cur}`
+  if (s.min) return `od ${s.min.toLocaleString('pl-PL')} ${cur}`
+  return null
+}
+
+function plainText(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function highlightVueReact(skill: string): 'vue' | 'react' | 'angular' | 'svelte' | null {
+  const s = skill.toLowerCase()
+  if (/\bvue/.test(s)) return 'vue'
+  if (/\breact/.test(s)) return 'react'
+  if (/\bangular/.test(s)) return 'angular'
+  if (/\bsvelte/.test(s)) return 'svelte'
+  return null
+}
+
+const primaryListing = computed(() => props.group.listings[0])
+const allSkills = computed(() => {
+  const set = new Map<string, string>()
+  for (const l of props.group.listings) {
+    for (const s of l.skills) {
+      const key = s.toLowerCase()
+      if (!set.has(key)) set.set(key, s)
+    }
+  }
+  return Array.from(set.values())
+})
+
+const description = computed(() => primaryListing.value ? plainText(primaryListing.value.description) : '')
+
+const STATUS_COLOR: Record<string, string> = {
+  new:        'badge-new',
+  interested: 'badge-interested',
+  applied:    'badge-applied',
+  replied:    'badge-replied',
+  rejected:   'badge-rejected',
+  hidden:     'badge-hidden',
+}
+
+async function saveNotes() {
+  savingNotes.value = true
+  try { await setNotes(props.group.id, notesDraft.value) }
+  finally { savingNotes.value = false }
+}
+
+async function change(s: Status) {
+  await setStatus(props.group.id, s)
+}
+</script>
+
+<template>
+  <article class="card" :class="{ 'is-vue': group.hasVue }">
+    <header class="head">
+      <div class="title-block">
+        <h2 class="title">{{ group.canonicalTitle }}</h2>
+        <p class="company">{{ group.canonicalCompany }}</p>
+      </div>
+      <div class="meta">
+        <span v-if="group.vueInTitle" class="pill pill-vue-strong">Vue w tytule</span>
+        <span v-else-if="group.hasVue" class="pill pill-vue">Vue w opisie</span>
+        <span v-if="group.hasReact" class="pill pill-react">React</span>
+        <span v-if="group.hasAngular" class="pill pill-angular">Angular</span>
+        <span class="status" :class="STATUS_COLOR[group.status]">{{ STATUS_LABEL[group.status as Status] ?? group.status }}</span>
+      </div>
+    </header>
+
+    <div class="sub">
+      <span v-if="primaryListing?.location">{{ primaryListing.location }}</span>
+      <span v-if="primaryListing?.remote" class="muted">· remote</span>
+      <span v-if="primaryListing?.experience" class="muted">· {{ primaryListing.experience }}</span>
+      <span v-if="fmtSalary(group)" class="salary">· {{ fmtSalary(group) }}</span>
+    </div>
+
+    <div class="sources">
+      <a
+        v-for="l in group.listings"
+        :key="l.id"
+        :href="l.url"
+        target="_blank"
+        rel="noopener"
+        class="source-pill"
+      >{{ SOURCE_LABEL[l.source] ?? l.source }}</a>
+    </div>
+
+    <div v-if="allSkills.length" class="skills">
+      <span
+        v-for="s in allSkills"
+        :key="s"
+        class="skill"
+        :class="highlightVueReact(s) ? `skill-${highlightVueReact(s)}` : ''"
+      >{{ s }}</span>
+    </div>
+
+    <div v-if="expanded" class="expanded">
+      <p class="description">{{ description.slice(0, 1500) }}<span v-if="description.length > 1500">…</span></p>
+
+      <div class="actions">
+        <span class="actions-label">Zmień status:</span>
+        <button
+          v-for="s in STATUSES"
+          :key="s"
+          class="status-btn"
+          :class="{ active: group.status === s }"
+          @click="change(s as Status)"
+        >{{ STATUS_LABEL[s as Status] }}</button>
+      </div>
+
+      <div class="notes">
+        <label>
+          <span>Notatki</span>
+          <textarea v-model="notesDraft" rows="3" placeholder="Twoje notatki o ofercie..." />
+        </label>
+        <button class="btn-save" :disabled="savingNotes || notesDraft === group.notes" @click="saveNotes">
+          {{ savingNotes ? 'Zapisuję...' : 'Zapisz' }}
+        </button>
+      </div>
+    </div>
+
+    <button class="expand-toggle" @click="expanded = !expanded">
+      {{ expanded ? '↑ Zwiń' : '↓ Pokaż szczegóły' }}
+    </button>
+  </article>
+</template>
+
+<style scoped>
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  padding: 1rem 1.2rem;
+  margin-bottom: 0.8rem;
+}
+.card.is-vue { border-left: 3px solid var(--vue); }
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+.title-block { flex: 1; }
+.title { margin: 0; font-size: 1.1rem; line-height: 1.3; }
+.company { margin: 0.2rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.meta { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+
+.sub {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.salary { color: var(--accent-2); font-weight: 600; }
+.muted { opacity: 0.7; }
+
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.5rem;
+}
+.source-pill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  color: var(--fg);
+  text-decoration: none;
+}
+.source-pill:hover { background: var(--accent); color: white; }
+
+.skills {
+  margin-top: 0.6rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+.skill {
+  font-size: 0.75rem;
+  padding: 0.15rem 0.5rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+}
+.skill-vue     { background: rgba(65, 184, 131, 0.2); border-color: var(--vue); color: var(--vue); font-weight: 600; }
+.skill-react   { background: rgba(97, 218, 251, 0.15); border-color: #61dafb; color: #61dafb; }
+.skill-angular { background: rgba(221, 0, 49, 0.15); border-color: #dd0031; color: #ff5e7e; }
+.skill-svelte  { background: rgba(255, 62, 0, 0.15); border-color: #ff3e00; color: #ff7a4d; }
+
+.pill {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.3rem;
+  font-weight: 600;
+}
+.pill-vue        { background: rgba(65, 184, 131, 0.15); color: var(--vue); }
+.pill-vue-strong { background: var(--vue); color: white; }
+.pill-react      { background: rgba(97, 218, 251, 0.15); color: #61dafb; }
+.pill-angular    { background: rgba(221, 0, 49, 0.15); color: #ff5e7e; }
+
+.status {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.3rem;
+  font-weight: 600;
+}
+.badge-new        { background: rgba(99, 102, 241, 0.2);  color: #a5b4fc; }
+.badge-interested { background: rgba(245, 158, 11, 0.2);  color: #fbbf24; }
+.badge-applied    { background: rgba(34, 197, 94, 0.2);   color: #4ade80; }
+.badge-replied    { background: rgba(168, 85, 247, 0.2);  color: #c4b5fd; }
+.badge-rejected   { background: rgba(239, 68, 68, 0.2);   color: #fca5a5; }
+.badge-hidden     { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
+
+.expanded {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+.description {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: var(--fg);
+  max-height: 14rem;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  margin-top: 0.8rem;
+}
+.actions-label { font-size: 0.85rem; color: var(--muted); margin-right: 0.4rem; }
+.status-btn {
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  cursor: pointer;
+  color: var(--fg);
+}
+.status-btn:hover { border-color: var(--accent); }
+.status-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
+
+.notes { margin-top: 0.8rem; }
+.notes label { display: block; }
+.notes span { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 0.3rem; }
+.notes textarea {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+}
+.btn-save {
+  margin-top: 0.4rem;
+  padding: 0.4rem 0.9rem;
+  background: var(--accent);
+  color: white;
+  border: 0;
+  border-radius: 0.3rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.expand-toggle {
+  margin-top: 0.6rem;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  padding: 0;
+}
+.expand-toggle:hover { color: var(--accent); }
+</style>

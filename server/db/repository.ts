@@ -1,0 +1,214 @@
+import type { Database } from 'better-sqlite3'
+import { useDb } from './index'
+import type { RawJob } from '../scrapers/types'
+import { detectFrameworks } from '../lib/vueDetector'
+import { fingerprintFor, normalizeCompany, normalizeTitle, levenshtein } from '../lib/fingerprint'
+
+export interface ListingRow {
+  id: number
+  source: string
+  source_id: string
+  url: string
+  title: string
+  company: string
+  location: string | null
+  remote: number
+  salary_min: number | null
+  salary_max: number | null
+  currency: string | null
+  salary_period: string | null
+  contract_type: string | null
+  experience: string | null
+  description: string
+  skills_json: string
+  has_vue: number
+  has_react: number
+  has_angular: number
+  has_svelte: number
+  vue_in_title: number
+  posted_at: string | null
+  first_seen_at: string
+  last_seen_at: string
+  group_id: number | null
+}
+
+export interface GroupRow {
+  id: number
+  fingerprint: string
+  canonical_title: string
+  canonical_company: string
+  status: string
+  notes: string
+  applied_at: string | null
+  manually_merged: number
+  manually_split: number
+  created_at: string
+  updated_at: string
+}
+
+export interface UpsertResult {
+  listingId: number
+  groupId: number
+  isNewListing: boolean
+  isNewGroup: boolean
+}
+
+const FUZZY_TITLE_MAX_DISTANCE = 3
+const FUZZY_RECENT_DAYS = 30
+
+function findGroupByFingerprint(db: Database, fingerprint: string): GroupRow | undefined {
+  return db
+    .prepare<[string], GroupRow>(
+      'SELECT * FROM job_groups WHERE fingerprint = ? LIMIT 1',
+    )
+    .get(fingerprint)
+}
+
+function findFuzzyGroup(
+  db: Database,
+  company: string,
+  title: string,
+): GroupRow | undefined {
+  // Candidate groups share the same normalized company; we then verify title proximity.
+  const normCompany = normalizeCompany(company)
+  const normTitle = normalizeTitle(title)
+  const candidates = db
+    .prepare<[string, string], GroupRow>(
+      `SELECT * FROM job_groups
+       WHERE fingerprint LIKE ? || '|%'
+         AND created_at >= datetime('now', ?)
+         AND manually_split = 0`,
+    )
+    .all(normCompany, `-${FUZZY_RECENT_DAYS} days`)
+
+  for (const c of candidates) {
+    const candidateTitle = c.fingerprint.split('|')[1] ?? ''
+    if (levenshtein(candidateTitle, normTitle) <= FUZZY_TITLE_MAX_DISTANCE) {
+      return c
+    }
+  }
+  return undefined
+}
+
+function createGroup(db: Database, company: string, title: string): GroupRow {
+  const now = new Date().toISOString()
+  const fingerprint = fingerprintFor(company, title)
+  const info = db
+    .prepare(
+      `INSERT INTO job_groups
+        (fingerprint, canonical_title, canonical_company, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(fingerprint, title, company, now, now)
+  return {
+    id: Number(info.lastInsertRowid),
+    fingerprint,
+    canonical_title: title,
+    canonical_company: company,
+    status: 'new',
+    notes: '',
+    applied_at: null,
+    manually_merged: 0,
+    manually_split: 0,
+    created_at: now,
+    updated_at: now,
+  }
+}
+
+// Inserts the listing if new, updates last_seen_at if we already have it.
+// Resolves (or creates) the group for cross-source deduplication.
+export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult {
+  const now = new Date().toISOString()
+  const flags = detectFrameworks({
+    title: job.title,
+    description: job.description,
+    skills: job.skills,
+  })
+
+  const existing = db
+    .prepare<[string, string], ListingRow>(
+      'SELECT * FROM job_listings WHERE source = ? AND source_id = ? LIMIT 1',
+    )
+    .get(job.source, job.sourceId)
+
+  if (existing) {
+    db.prepare('UPDATE job_listings SET last_seen_at = ? WHERE id = ?').run(now, existing.id)
+    return {
+      listingId: existing.id,
+      groupId: existing.group_id ?? 0,
+      isNewListing: false,
+      isNewGroup: false,
+    }
+  }
+
+  // Resolve group: exact fingerprint → fuzzy → new.
+  const fingerprint = fingerprintFor(job.company, job.title)
+  let group = findGroupByFingerprint(db, fingerprint)
+  let isNewGroup = false
+  if (!group) {
+    group = findFuzzyGroup(db, job.company, job.title)
+  }
+  if (!group) {
+    group = createGroup(db, job.company, job.title)
+    isNewGroup = true
+  }
+
+  const info = db
+    .prepare(
+      `INSERT INTO job_listings (
+        source, source_id, url, title, company, location, remote,
+        salary_min, salary_max, currency, salary_period, contract_type, experience,
+        description, skills_json,
+        has_vue, has_react, has_angular, has_svelte, vue_in_title,
+        posted_at, first_seen_at, last_seen_at, group_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      job.source,
+      job.sourceId,
+      job.url,
+      job.title,
+      job.company,
+      job.location ?? null,
+      job.remote ? 1 : 0,
+      job.salaryMin ?? null,
+      job.salaryMax ?? null,
+      job.currency ?? null,
+      job.salaryPeriod ?? null,
+      job.contractType ?? null,
+      job.experience ?? null,
+      job.description,
+      JSON.stringify(job.skills),
+      flags.hasVue ? 1 : 0,
+      flags.hasReact ? 1 : 0,
+      flags.hasAngular ? 1 : 0,
+      flags.hasSvelte ? 1 : 0,
+      flags.vueInTitle ? 1 : 0,
+      job.postedAt ?? null,
+      now,
+      now,
+      group.id,
+    )
+
+  return {
+    listingId: Number(info.lastInsertRowid),
+    groupId: group.id,
+    isNewListing: true,
+    isNewGroup,
+  }
+}
+
+export function recordScrapeRun(
+  source: string,
+  status: 'running' | 'ok' | 'error',
+  fetched: number,
+  newCount: number,
+  errorMessage: string | null,
+  db: Database = useDb(),
+): void {
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO scrape_runs (source, started_at, finished_at, status, fetched_count, new_count, error_message)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(source, now, status === 'running' ? null : now, status, fetched, newCount, errorMessage)
+}
