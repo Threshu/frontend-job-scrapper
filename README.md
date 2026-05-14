@@ -22,7 +22,10 @@ duplikaty z różnych źródeł i pozwala śledzić status aplikacji.
 - **Notatki** do każdej grupy
 - **Powiadomienia desktop** (Web Notifications API) gdy cron znajdzie nowe oferty
 - **Cron** scrapuje w tle co X minut + przycisk "Scrapuj teraz" w UI
-- **Filtry**: status, źródło, "tylko z Vue", search po firmie/tytule
+- **Filtry**: status, źródło, "tylko z Vue", search po firmie/tytule, "pokaż archiwum"
+- **Wykrywanie nieaktualnych** ofert: listing jest stale gdy nie był widziany
+  przez >7 dni LUB jego `posted_at` jest starszy niż 60 dni (progi konfigurowalne).
+  Grupa stale = wszystkie listingi stale. Stale ukrywane domyślnie
 
 ## Stack
 
@@ -48,6 +51,8 @@ patrz output `npm run dev`).
 |---|---|---|
 | `DB_PATH` | `./data/jobs.sqlite` | Plik bazy SQLite (tworzony automatycznie) |
 | `SCRAPE_INTERVAL_MINUTES` | `30` | Co ile minut cron robi scrape. `0` wyłącza cron (tylko manualnie) |
+| `STALE_LAST_SEEN_DAYS` | `7` | Po ilu dniach nieaktualizowanego `last_seen_at` listing jest "stale" |
+| `STALE_POSTED_DAYS` | `60` | Po ilu dniach od `posted_at` listing jest "stale" |
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `NOTIFY_EMAIL` | puste | (zarezerwowane na powiadomienia email — nie wpięte w MVP) |
 
 ### Pierwszy scrape
