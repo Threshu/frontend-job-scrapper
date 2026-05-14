@@ -51,6 +51,14 @@ function highlightVueReact(skill: string): 'vue' | 'react' | 'angular' | 'svelte
 }
 
 const primaryListing = computed(() => props.group.listings[0])
+
+const staleTooltip = computed(() => {
+  const reasons = props.group.listings.map((l) => l.staleReason).filter(Boolean) as string[]
+  if (reasons.includes('unseen') && reasons.includes('aged')) return 'Zniknęło ze źródła i jest stare'
+  if (reasons.includes('unseen')) return 'Zniknęło ze źródła (niewidziane przy ostatnich scrape’ach)'
+  if (reasons.includes('aged')) return 'Stara data publikacji'
+  return 'Nieaktualne'
+})
 const allSkills = computed(() => {
   const set = new Map<string, string>()
   for (const l of props.group.listings) {
@@ -85,13 +93,14 @@ async function change(s: Status) {
 </script>
 
 <template>
-  <article class="card" :class="{ 'is-vue': group.hasVue }">
+  <article class="card" :class="{ 'is-vue': group.hasVue, 'is-stale': group.isStale }">
     <header class="head">
       <div class="title-block">
         <h2 class="title">{{ group.canonicalTitle }}</h2>
         <p class="company">{{ group.canonicalCompany }}</p>
       </div>
       <div class="meta">
+        <span v-if="group.isStale" class="pill pill-stale" :title="staleTooltip">Archiwum</span>
         <span v-if="group.vueInTitle" class="pill pill-vue-strong">Vue w tytule</span>
         <span v-else-if="group.hasVue" class="pill pill-vue">Vue w opisie</span>
         <span v-if="group.hasReact" class="pill pill-react">React</span>
@@ -167,6 +176,8 @@ async function change(s: Status) {
   margin-bottom: 0.8rem;
 }
 .card.is-vue { border-left: 3px solid var(--vue); }
+.card.is-stale { opacity: 0.55; }
+.card.is-stale:hover { opacity: 0.85; }
 
 .head {
   display: flex;
@@ -235,6 +246,7 @@ async function change(s: Status) {
 .pill-vue-strong { background: var(--vue); color: white; }
 .pill-react      { background: rgba(97, 218, 251, 0.15); color: #61dafb; }
 .pill-angular    { background: rgba(221, 0, 49, 0.15); color: #ff5e7e; }
+.pill-stale      { background: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
 
 .status {
   font-size: 0.7rem;

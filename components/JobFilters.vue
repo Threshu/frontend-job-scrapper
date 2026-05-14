@@ -32,6 +32,11 @@ function apply() { refresh() }
       <span>Tylko z Vue</span>
     </label>
 
+    <label class="checkbox">
+      <input v-model="filters.includeStale" type="checkbox" @change="apply">
+      <span>Pokaż archiwum</span>
+    </label>
+
     <label class="field grow">
       <span>Szukaj</span>
       <input v-model="filters.search" type="text" placeholder="firma, tytuł..." @keyup.enter="apply">

@@ -5,6 +5,7 @@ export interface JobFilters {
   hasVue: boolean
   source: string
   search: string
+  includeStale: boolean
 }
 
 export const STATUSES = ['new', 'interested', 'applied', 'replied', 'rejected', 'hidden'] as const
@@ -25,6 +26,7 @@ export function useJobs() {
     hasVue: true,
     source: '',
     search: '',
+    includeStale: false,
   }))
   const groups = useState<GroupDto[]>('groups', () => [])
   const loading = useState<boolean>('groupsLoading', () => false)
@@ -37,6 +39,7 @@ export function useJobs() {
       if (filters.value.hasVue) q.hasVue = '1'
       if (filters.value.source) q.source = filters.value.source
       if (filters.value.search) q.search = filters.value.search
+      if (filters.value.includeStale) q.includeStale = '1'
       const res = await $fetch<{ groups: GroupDto[] }>('/api/groups', { query: q })
       groups.value = res.groups
     } finally {

@@ -83,43 +83,75 @@ async function fetchListPage(url: string, page: number): Promise<TProtoListOffer
   return findOffersList(data) ?? []
 }
 
-async function fetchDetailDescription(offerUrlName: string): Promise<string> {
-  // Detail URL: https://theprotocol.it/szczegoly/{offerUrlName}
-  const url = `https://theprotocol.it/szczegoly/${offerUrlName}`
-  let html: string
+// theProtocol's detail page does NOT SSR the offer content — it XHRs from a
+// separate API at apus-api.theprotocol.it which lives outside Cloudflare and
+// answers plain fetch requests without auth. The response includes a
+// `jsonSections` string that itself encodes an array of structured
+// description blocks (responsibilities, about-project, requirements...).
+//
+// Strategy: list pages stay rendered via Chromium (Cloudflare), but for the
+// description we hit apus-api directly. Much faster too.
+const APUS_API = 'https://apus-api.theprotocol.it'
+const APUS_HEADERS: HeadersInit = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36',
+  Accept: 'application/json',
+  Origin: 'https://theprotocol.it',
+  Referer: 'https://theprotocol.it/',
+}
+
+interface JsonSection {
+  sectionType?: string
+  title?: string
+  header?: string | null
+  model?: {
+    modelType?: string
+    paragraphs?: string[]
+    items?: Array<{ value?: string; text?: string }>
+    text?: string
+  }
+  subSections?: JsonSection[]
+}
+
+function extractTextFromSection(s: JsonSection): string {
+  const parts: string[] = []
+  if (s.title) parts.push(s.title)
+  if (s.header) parts.push(s.header)
+  const m = s.model
+  if (m) {
+    if (Array.isArray(m.paragraphs)) parts.push(...m.paragraphs)
+    if (typeof m.text === 'string') parts.push(m.text)
+    if (Array.isArray(m.items)) {
+      for (const it of m.items) {
+        if (typeof it.value === 'string') parts.push(it.value)
+        if (typeof it.text === 'string') parts.push(it.text)
+      }
+    }
+  }
+  if (Array.isArray(s.subSections)) {
+    for (const sub of s.subSections) parts.push(extractTextFromSection(sub))
+  }
+  return parts.filter(Boolean).join(' ')
+}
+
+async function fetchDetailDescription(offerId: string, signal?: AbortSignal): Promise<string> {
   try {
-    html = await fetchPageHtml(url, { waitForSelector: 'script#__NEXT_DATA__' })
+    const res = await fetch(`${APUS_API}/offers/${offerId}`, { headers: APUS_HEADERS, signal })
+    if (!res.ok) return ''
+    const data = (await res.json()) as { jsonSections?: string }
+    if (!data.jsonSections) return ''
+    let sections: JsonSection[]
+    try { sections = JSON.parse(data.jsonSections) as JsonSection[] } catch { return '' }
+    return sections.map(extractTextFromSection).join('\n\n').replace(/\s+/g, ' ').trim()
   } catch {
     return ''
   }
-  const data = extractNextData(html) as unknown
-  // The detail blob lives under pageProps; we walk and find a field that
-  // looks like the description.
-  function findDesc(obj: unknown): string | null {
-    if (!obj || typeof obj !== 'object') return null
-    const o = obj as Record<string, unknown>
-    for (const k of ['responsibilities', 'aboutProject', 'description', 'projectDescription', 'aboutProjectShortDescription']) {
-      if (typeof o[k] === 'string' && (o[k] as string).length > 30) return o[k] as string
-      if (Array.isArray(o[k])) {
-        const arr = o[k] as unknown[]
-        const text = arr.map((x) => (typeof x === 'string' ? x : (x as Record<string, unknown>)?.value ?? '')).join(' ')
-        if (text.length > 30) return text
-      }
-    }
-    for (const v of Object.values(o)) {
-      const r = findDesc(v)
-      if (r) return r
-    }
-    return null
-  }
-  return htmlToText(findDesc(data) ?? '')
 }
 
 function buildRawJob(o: TProtoListOffer, description: string): RawJob {
   return {
     source: 'theprotocol',
     sourceId: o.id,
-    url: `https://theprotocol.it/szczegoly/${o.offerUrlName}`,
+    url: `https://theprotocol.it/szczegoly/praca/${o.offerUrlName}`,
     title: o.title,
     company: o.employer,
     location: o.workplace?.[0]?.city ?? o.workplace?.[0]?.location,
@@ -174,7 +206,7 @@ export const theProtocolScraper: JobScraper = {
 
     for (const o of listSeed) {
       try {
-        const description = await fetchDetailDescription(o.offerUrlName)
+        const description = await fetchDetailDescription(o.id, ctx.signal)
         jobs.push(buildRawJob(o, description))
         if (ctx.maxResults && jobs.length >= ctx.maxResults) {
           return { source: this.source, jobs, errors }

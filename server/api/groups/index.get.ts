@@ -15,6 +15,7 @@ export interface GroupDto {
   hasAngular: boolean
   hasSvelte: boolean
   vueInTitle: boolean
+  isStale: boolean                       // true iff EVERY listing is stale
   bestSalary: { min: number | null; max: number | null; currency: string | null } | null
   listings: Array<{
     id: number
@@ -38,10 +39,19 @@ export interface GroupDto {
     postedAt: string | null
     firstSeenAt: string
     lastSeenAt: string
+    isStale: boolean
+    staleReason: 'unseen' | 'aged' | null
   }>
 }
 
-function mapListing(r: ListingRow): GroupDto['listings'][number] {
+interface ListingRowWithStale extends ListingRow {
+  is_stale_unseen: number
+  is_stale_aged: number
+}
+
+function mapListing(r: ListingRowWithStale): GroupDto['listings'][number] {
+  const stale = r.is_stale_unseen === 1 || r.is_stale_aged === 1
+  const reason: 'unseen' | 'aged' | null = r.is_stale_unseen === 1 ? 'unseen' : r.is_stale_aged === 1 ? 'aged' : null
   return {
     id: r.id,
     source: r.source,
@@ -64,21 +74,28 @@ function mapListing(r: ListingRow): GroupDto['listings'][number] {
     postedAt: r.posted_at,
     firstSeenAt: r.first_seen_at,
     lastSeenAt: r.last_seen_at,
+    isStale: stale,
+    staleReason: reason,
   }
 }
 
 export default defineEventHandler((event) => {
+  const config = useRuntimeConfig()
+  const lastSeenDays = Number(config.staleLastSeenDays ?? 7)
+  const postedDays = Number(config.stalePostedDays ?? 60)
+
   const q = getQuery(event)
   const status = typeof q.status === 'string' ? q.status : undefined
   const hasVue = q.hasVue === '1' || q.hasVue === 'true'
   const sourceFilter = typeof q.source === 'string' ? q.source : undefined
   const search = typeof q.search === 'string' ? q.search.trim() : ''
+  // excludeStale defaults to true — pokazujemy tylko żywe oferty chyba że
+  // ktoś świadomie przełączy "pokaż archiwum".
+  const includeStale = q.includeStale === '1' || q.includeStale === 'true'
   const limit = Math.min(Number(q.limit) || 200, 500)
 
   const db = useDb()
 
-  // Pull groups first (paginated), then their listings. Filtering by
-  // listing-level flags (hasVue/source) requires a JOIN with DISTINCT.
   const where: string[] = []
   const params: unknown[] = []
   if (status) { where.push('g.status = ?'); params.push(status) }
@@ -96,6 +113,18 @@ export default defineEventHandler((event) => {
     )`)
     if (sourceFilter) params.push(sourceFilter)
   }
+  // Stale filter: exclude groups whose ALL listings are stale.
+  // "stale" = last_seen_at older than threshold OR posted_at older than threshold.
+  // Implemented as: there must EXIST at least one fresh listing.
+  if (!includeStale) {
+    where.push(`EXISTS (
+      SELECT 1 FROM job_listings l
+      WHERE l.group_id = g.id
+        AND l.last_seen_at >= datetime('now', '-' || ? || ' days')
+        AND (l.posted_at IS NULL OR l.posted_at >= datetime('now', '-' || ? || ' days'))
+    )`)
+    params.push(lastSeenDays, postedDays)
+  }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
 
   const groups = db
@@ -109,13 +138,22 @@ export default defineEventHandler((event) => {
 
   const ids = groups.map((g) => g.id)
   const placeholders = ids.map(() => '?').join(',')
-  const listings = db
-    .prepare<unknown[], ListingRow>(
-      `SELECT * FROM job_listings WHERE group_id IN (${placeholders}) ORDER BY first_seen_at DESC`,
-    )
-    .all(...ids)
 
-  const byGroup = new Map<number, ListingRow[]>()
+  // Pull listings with computed stale flags. We compute two separate signals
+  // so the UI can show "knikło z portalu" vs "wygasło z czasu".
+  const listings = db
+    .prepare<unknown[], ListingRowWithStale>(
+      `SELECT
+         l.*,
+         CASE WHEN l.last_seen_at < datetime('now', '-' || ? || ' days') THEN 1 ELSE 0 END AS is_stale_unseen,
+         CASE WHEN l.posted_at IS NOT NULL AND l.posted_at < datetime('now', '-' || ? || ' days') THEN 1 ELSE 0 END AS is_stale_aged
+       FROM job_listings l
+       WHERE l.group_id IN (${placeholders})
+       ORDER BY l.first_seen_at DESC`,
+    )
+    .all(lastSeenDays, postedDays, ...ids)
+
+  const byGroup = new Map<number, ListingRowWithStale[]>()
   for (const l of listings) {
     if (l.group_id == null) continue
     if (!byGroup.has(l.group_id)) byGroup.set(l.group_id, [])
@@ -132,6 +170,8 @@ export default defineEventHandler((event) => {
         }
       }
     }
+    const mappedListings = ls.map(mapListing)
+    const groupStale = mappedListings.length > 0 && mappedListings.every((l) => l.isStale)
     return {
       id: g.id,
       canonicalTitle: g.canonical_title,
@@ -146,8 +186,9 @@ export default defineEventHandler((event) => {
       hasAngular: ls.some((l) => l.has_angular),
       hasSvelte: ls.some((l) => l.has_svelte),
       vueInTitle: ls.some((l) => l.vue_in_title),
+      isStale: groupStale,
       bestSalary,
-      listings: ls.map(mapListing),
+      listings: mappedListings,
     }
   })
 

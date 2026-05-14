@@ -63,7 +63,12 @@
       "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"sources\":[\"rocketjobs\",\"remoteok\"],\"maxPerSource\":5}' http://localhost:3002/api/scrape --max-time 120)",
       "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"sources\":[\"pracuj\",\"theprotocol\"],\"maxPerSource\":3}' http://localhost:3002/api/scrape --max-time 600)",
       "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"sources\":[\"pracuj\",\"theprotocol\",\"solidjobs\",\"4programmers\",\"indeed\"],\"maxPerSource\":3}' http://localhost:3002/api/scrape --max-time 600)",
-      "Bash(curl -s \"http://localhost:3002/api/groups?status=&limit=500\")"
+      "Bash(curl -s \"http://localhost:3002/api/groups?status=&limit=500\")",
+      "Bash(curl -s \"http://localhost:3002/api/groups?status=&source=theprotocol&limit=20\")",
+      "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' -H 'Accept: application/json' https://apus-api.theprotocol.it/offers/e5df0000-8bb4-268a-a061-08deaaab3c5a -w '\\\\nHTTP %{http_code}\\\\n')",
+      "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' 'https://apus-api.theprotocol.it/offers/_search?pageNumber=1&pageSize=5&orderby.field=Relevance' -o /c/Users/sbm/AppData/Local/Temp/tp_api.json -w 'HTTP %{http_code} size %{size_download}\\\\n')",
+      "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"sources\":[\"theprotocol\"],\"maxPerSource\":3}' http://localhost:3002/api/scrape --max-time 300)",
+      "Bash(curl -s \"http://localhost:3002/api/groups?status=&source=theprotocol&limit=5\")"
     ]
   }
 }
