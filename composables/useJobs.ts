@@ -34,7 +34,7 @@ export function useJobs() {
 	);
 	const filters = useState<JobFilters>("filters", () => ({
 		status: "new",
-		hasVue: true,
+		hasVue: false,
 		source: "",
 		search: "",
 		includeStale: false,

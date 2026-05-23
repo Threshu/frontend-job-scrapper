@@ -55,12 +55,11 @@
 			if (r.status === "already-running") {
 				scrapeMessage.value = "Scrape już w toku — odśwież za chwilę.";
 			} else if (r.result) {
-				const fresh = r.result.perSource.reduce((a, s) => a + s.newGroups, 0);
-				const errCount = r.result.perSource.reduce(
-					(a, s) => a + s.errors.length,
-					0,
-				);
-				scrapeMessage.value = `Gotowe. Nowych ofert: ${fresh}${errCount ? ` · błędów: ${errCount}` : ""}`;
+				const fresh = r.result.perSource.reduce((a, s) => a + s.newListings, 0);
+				const errSources = r.result.perSource
+					.filter((s) => s.errors.length > 0)
+					.map((s) => s.source);
+				scrapeMessage.value = `Gotowe. Nowych ofert: ${fresh}${errSources.length ? ` · błędy: ${errSources.join(", ")}` : ""}`;
 				await refresh();
 				if (fresh > 0) {
 					notify(`${fresh} nowa oferta`, { body: "Sprawdź listę" });
