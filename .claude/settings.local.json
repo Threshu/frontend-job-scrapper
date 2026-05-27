@@ -68,7 +68,22 @@
       "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' -H 'Accept: application/json' https://apus-api.theprotocol.it/offers/e5df0000-8bb4-268a-a061-08deaaab3c5a -w '\\\\nHTTP %{http_code}\\\\n')",
       "Bash(curl -s -A 'Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36' 'https://apus-api.theprotocol.it/offers/_search?pageNumber=1&pageSize=5&orderby.field=Relevance' -o /c/Users/sbm/AppData/Local/Temp/tp_api.json -w 'HTTP %{http_code} size %{size_download}\\\\n')",
       "Bash(curl -s -X POST -H 'Content-Type: application/json' -d '{\"sources\":[\"theprotocol\"],\"maxPerSource\":3}' http://localhost:3002/api/scrape --max-time 300)",
-      "Bash(curl -s \"http://localhost:3002/api/groups?status=&source=theprotocol&limit=5\")"
+      "Bash(curl -s \"http://localhost:3002/api/groups?status=&source=theprotocol&limit=5\")",
+      "WebFetch(domain:remotive.com)",
+      "WebFetch(domain:www.praca.pl)",
+      "WebFetch(domain:crossweb.pl)",
+      "Bash(npx tsc *)",
+      "Bash(node_modules\\\\.bin\\\\tsc --noEmit)",
+      "Bash(curl -s http://localhost:3000/api/scrape/status)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); [print\\(r['source'], r['status'], r.get\\('fetched_count',0\\), r.get\\('new_count',0\\), \\(r.get\\('error_message'\\) or ''\\)[:80]\\) for r in d.get\\('runs',[]\\)]\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"http://localhost:3002/api/scrape/status\" -o C:\\\\Temp\\\\status.json)",
+      "Bash(curl -s \"http://localhost:3002/api/groups?limit=5&hasVue=1\" -o -)",
+      "Bash(curl -s -L \"https://crossweb.pl/en/job/job-offers/\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36\" -H \"Accept: text/html\")",
+      "Bash(curl -s -L \"https://crossweb.pl/en/job/job-offers/\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36\")",
+      "Bash(curl -s \"https://crossweb.pl/bob/bob.js.php?t=2&p=2&d=9953,9934,9916,9910,9909,9908,9889,9891,9872,9865,9605,\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36\" -H \"Referer: https://crossweb.pl/en/job/job-offers/\")",
+      "Bash(curl -s -L \"https://crossweb.pl/bob/bob.js.php/?t=2&p=2&d=9953,9934,9916,9910,9909,9908,9889,9891,9872,9865,9605,\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36\" -H \"Referer: https://crossweb.pl/en/job/job-offers/\")",
+      "PowerShell(New-Item *)"
     ]
   }
 }

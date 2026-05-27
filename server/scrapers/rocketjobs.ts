@@ -106,8 +106,8 @@ function buildRawJob(d: RjDetailOffer): RawJob {
   }
 }
 
-async function fetchPage(cursor: number | null, signal?: AbortSignal): Promise<RjListResponse> {
-  const url = cursor == null ? `${BASE}/offers` : `${BASE}/offers?cursor=${cursor}`
+async function fetchPage(from: number, signal?: AbortSignal): Promise<RjListResponse> {
+  const url = from === 0 ? `${BASE}/offers` : `${BASE}/offers?from=${from}`
   const res = await fetch(url, { headers: HEADERS, signal })
   if (!res.ok) throw new Error(`RJ list → HTTP ${res.status}`)
   return res.json() as Promise<RjListResponse>
@@ -120,7 +120,7 @@ async function fetchDetail(slug: string, signal?: AbortSignal): Promise<RjDetail
 }
 
 const MAX_PAGES = 100
-const REQUEST_DELAY_MS = 120
+const REQUEST_DELAY_MS = 400
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -136,17 +136,21 @@ export const rocketjobsScraper: JobScraper = {
     const jobs: RawJob[] = []
     const seen = new Set<string>()
 
-    let cursor: number | null = null
+    let from = 0
+    let totalItems = Infinity
     let pages = 0
 
-    while (pages < MAX_PAGES) {
+    while (from < totalItems && pages < MAX_PAGES) {
       let page: RjListResponse
       try {
-        page = await fetchPage(cursor, ctx.signal)
+        page = await fetchPage(from, ctx.signal)
       } catch (e) {
         errors.push((e as Error).message)
         break
       }
+
+      if (!page.data.length) break
+      if (pages === 0) totalItems = page.meta.totalItems
 
       for (const offer of page.data) {
         if (seen.has(offer.slug)) continue
@@ -165,9 +169,7 @@ export const rocketjobsScraper: JobScraper = {
         await sleep(REQUEST_DELAY_MS)
       }
 
-      const next = page.meta.next?.cursor ?? null
-      if (next == null) break
-      cursor = next
+      from += page.data.length
       pages++
       await sleep(REQUEST_DELAY_MS)
     }

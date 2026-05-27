@@ -7,19 +7,103 @@
 
 	const scrapeMessage = ref<string>("");
 
+	interface SourceInfo {
+		source: string;
+		displayName: string;
+		needsBrowser: boolean;
+	}
+
+	interface CompletedSource {
+		source: string;
+		fetched: number;
+		newListings: number;
+		newGroups: number;
+		errors: string[];
+	}
+
+	interface ScrapeProgressData {
+		running: boolean;
+		startedAt: string | null;
+		total: number;
+		completed: CompletedSource[];
+	}
+
+	const progressData = ref<ScrapeProgressData | null>(null);
+	const allSources = ref<SourceInfo[]>([]);
+	const elapsedSeconds = ref(0);
+
+	let progressTimer: ReturnType<typeof setInterval> | null = null;
+	let elapsedTimer: ReturnType<typeof setInterval> | null = null;
+
+	const sourceMap = computed(
+		() => new Map(allSources.value.map((s) => [s.source, s])),
+	);
+
+	const MAX_ERRORS_SHOWN = 3
+
+	const completedWithInfo = computed(() =>
+		(progressData.value?.completed ?? []).map((c) => {
+			// 403/apollo-state are partial failures — jobs were still saved via fallback.
+			// Only treat as ⚠ when the scraper collected nothing at all.
+			const criticalErrors = c.errors.filter(
+				(e) => !e.includes('HTTP 403') && !e.includes('not in apollo state'),
+			)
+			const hasWarning = c.errors.length > 0 && (criticalErrors.length > 0 || c.fetched === 0)
+			return {
+				...c,
+				displayName: sourceMap.value.get(c.source)?.displayName ?? c.source,
+				shownErrors: c.errors.slice(0, MAX_ERRORS_SHOWN),
+				hiddenErrorCount: Math.max(0, c.errors.length - MAX_ERRORS_SHOWN),
+				hasWarning,
+			}
+		}),
+	);
+
+	const pendingSources = computed(() => {
+		if (!progressData.value) return [];
+		const done = new Set(progressData.value.completed.map((c) => c.source));
+		return allSources.value.filter((s) => !done.has(s.source));
+	});
+
+	const progressPct = computed(() => {
+		const d = progressData.value;
+		if (!d || !d.total) return 0;
+		return Math.round((d.completed.length / d.total) * 100);
+	});
+
+	function fmtElapsed(s: number): string {
+		const m = Math.floor(s / 60);
+		const sec = s % 60;
+		return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${s}s`;
+	}
+
+	function stopProgress() {
+		if (progressTimer) {
+			clearInterval(progressTimer);
+			progressTimer = null;
+		}
+		if (elapsedTimer) {
+			clearInterval(elapsedTimer);
+			elapsedTimer = null;
+		}
+	}
+
+	async function pollProgress() {
+		try {
+			const data = await $fetch<ScrapeProgressData>("/api/scrape/status");
+			if (progressData.value) progressData.value = data;
+		} catch {
+			// ignore poll errors
+		}
+	}
+
 	await refresh();
 	await peek();
 
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 	onMounted(() => {
-		// Mark as visited shortly after the user has had a chance to see the badge.
-		setTimeout(() => {
-			markVisited();
-		}, 4000);
-
-		// Poll periodically so the user is notified when the cron picks up new
-		// offers in the background.
+		setTimeout(() => markVisited(), 4000);
 		pollTimer = setInterval(async () => {
 			const before = newCount.value;
 			const fresh = await peek();
@@ -31,6 +115,7 @@
 
 	onBeforeUnmount(() => {
 		if (pollTimer) clearInterval(pollTimer);
+		stopProgress();
 	});
 
 	async function switchTab(tab: "active" | "applied" | "rejected") {
@@ -39,7 +124,29 @@
 	}
 
 	async function doScrape() {
-		scrapeMessage.value = "Scrapuję...";
+		scrapeMessage.value = "";
+		elapsedSeconds.value = 0;
+
+		if (!allSources.value.length) {
+			try {
+				allSources.value = await $fetch<SourceInfo[]>("/api/sources");
+			} catch {
+				// continue without source info
+			}
+		}
+
+		progressData.value = {
+			running: true,
+			startedAt: new Date().toISOString(),
+			total: allSources.value.length,
+			completed: [],
+		};
+
+		elapsedTimer = setInterval(() => {
+			elapsedSeconds.value++;
+		}, 1000);
+		progressTimer = setInterval(pollProgress, 2000);
+
 		try {
 			const r = (await trigger()) as {
 				status: string;
@@ -52,10 +159,17 @@
 					}>;
 				};
 			};
+			stopProgress();
+
 			if (r.status === "already-running") {
+				progressData.value = null;
 				scrapeMessage.value = "Scrape już w toku — odśwież za chwilę.";
 			} else if (r.result) {
-				const fresh = r.result.perSource.reduce((a, s) => a + s.newListings, 0);
+				await pollProgress();
+				const fresh = r.result.perSource.reduce(
+					(a, s) => a + s.newListings,
+					0,
+				);
 				const errSources = r.result.perSource
 					.filter((s) => s.errors.length > 0)
 					.map((s) => s.source);
@@ -64,8 +178,13 @@
 				if (fresh > 0) {
 					notify(`${fresh} nowa oferta`, { body: "Sprawdź listę" });
 				}
+				setTimeout(() => {
+					progressData.value = null;
+				}, 8000);
 			}
 		} catch (e) {
+			stopProgress();
+			progressData.value = null;
 			scrapeMessage.value = `Błąd: ${(e as Error).message}`;
 		}
 	}
@@ -98,6 +217,56 @@
 				</button>
 			</div>
 		</header>
+
+		<div v-if="progressData" class="scrape-progress">
+			<div class="sp-head">
+				<span class="sp-title">{{
+					running ? "Scrapowanie w toku..." : "Scrapowanie zakończone"
+				}}</span>
+				<span class="sp-elapsed">{{ fmtElapsed(elapsedSeconds) }}</span>
+				<span class="sp-count"
+					>{{ progressData.completed.length }} /
+					{{ progressData.total }} źródeł</span
+				>
+			</div>
+			<div class="sp-bar-track">
+				<div class="sp-bar-fill" :style="{ width: `${progressPct}%` }" />
+			</div>
+			<div class="sp-sources">
+				<div
+					v-for="c in completedWithInfo"
+					:key="c.source"
+					class="sp-source-block"
+				>
+					<div class="sp-row" :class="{ 'sp-row-err': c.hasWarning }">
+						<span class="sp-icon">{{ c.hasWarning ? "⚠" : "✓" }}</span>
+						<span class="sp-name">{{ c.displayName }}</span>
+						<span class="sp-stat"
+							>{{ c.fetched }} ofert · {{ c.newListings }} nowych</span
+						>
+					</div>
+					<div v-if="c.shownErrors.length" class="sp-errs">
+						<p
+							v-for="(e, i) in c.shownErrors"
+							:key="i"
+							class="sp-err-line"
+						>{{ e }}</p>
+						<p v-if="c.hiddenErrorCount > 0" class="sp-err-more">
+							… i {{ c.hiddenErrorCount }} więcej
+						</p>
+					</div>
+				</div>
+				<div
+					v-for="s in pendingSources"
+					:key="s.source"
+					class="sp-row sp-pending"
+				>
+					<span class="sp-icon sp-spin">⟳</span>
+					<span class="sp-name">{{ s.displayName }}</span>
+					<span v-if="s.needsBrowser" class="sp-browser">przeglądarka</span>
+				</div>
+			</div>
+		</div>
 
 		<p v-if="scrapeMessage" class="scrape-msg">{{ scrapeMessage }}</p>
 
@@ -210,6 +379,120 @@
 		font-size: 0.85rem;
 		align-self: center;
 	}
+
+	/* ── Scrape progress panel ── */
+	.scrape-progress {
+		background: var(--card);
+		border: 1px solid var(--border);
+		border-radius: 0.5rem;
+		padding: 0.9rem 1rem;
+		margin-bottom: 1rem;
+	}
+	.sp-head {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		margin-bottom: 0.6rem;
+	}
+	.sp-title {
+		font-size: 0.9rem;
+		font-weight: 600;
+		flex: 1;
+	}
+	.sp-elapsed {
+		font-size: 0.8rem;
+		color: var(--muted);
+		font-variant-numeric: tabular-nums;
+	}
+	.sp-count {
+		font-size: 0.8rem;
+		color: var(--muted);
+	}
+	.sp-bar-track {
+		height: 4px;
+		background: var(--border);
+		border-radius: 2px;
+		overflow: hidden;
+		margin-bottom: 0.75rem;
+	}
+	.sp-bar-fill {
+		height: 100%;
+		background: var(--accent);
+		border-radius: 2px;
+		transition: width 0.4s ease;
+	}
+	.sp-sources {
+		display: flex;
+		flex-direction: column;
+		gap: 0.25rem;
+	}
+	.sp-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: 0.82rem;
+	}
+	.sp-icon {
+		width: 1rem;
+		text-align: center;
+		flex-shrink: 0;
+	}
+	.sp-name {
+		font-weight: 500;
+		min-width: 6rem;
+	}
+	.sp-stat {
+		color: var(--muted);
+	}
+	.sp-browser {
+		font-size: 0.72rem;
+		color: var(--muted);
+		opacity: 0.7;
+	}
+	.sp-done .sp-icon {
+		color: var(--accent-2);
+	}
+	.sp-row-err .sp-icon {
+		color: #f87171;
+	}
+	.sp-source-block {
+		display: flex;
+		flex-direction: column;
+		gap: 0.15rem;
+	}
+	.sp-errs {
+		padding-left: 1.5rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+	}
+	.sp-err-line {
+		font-size: 0.72rem;
+		color: #f87171;
+		margin: 0;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.sp-err-more {
+		font-size: 0.72rem;
+		color: var(--muted);
+		margin: 0;
+		opacity: 0.7;
+	}
+	.sp-pending {
+		opacity: 0.5;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	.sp-spin {
+		display: inline-block;
+		animation: spin 1s linear infinite;
+	}
+
 	.scrape-msg {
 		padding: 0.6rem 1rem;
 		background: var(--card);

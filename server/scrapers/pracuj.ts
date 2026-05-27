@@ -3,7 +3,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience,
 } from './types'
-import { fetchPageHtml } from '../lib/browser'
+import { fetchPagesHtmlSequential } from '../lib/browser'
 
 // Pracuj.pl serves SSR pages with everything we need embedded in
 // __NEXT_DATA__. No detail fetch required — `jobDescription` is already on
@@ -12,11 +12,16 @@ import { fetchPageHtml } from '../lib/browser'
 // We pull a few frontend-flavoured search URLs and paginate via ?pn=N. The
 // pages return 50 grouped offers each (each "group" may have multiple
 // per-city listings under `offers[]`).
+// Only paths confirmed to return __NEXT_DATA__ via Playwright.
+// The `;kw` suffix is Pracuj's keyword filter. Short or spaced keywords
+// ("/praca/vue;kw", "/praca/front%20end%20developer;kw") return plain HTML
+// without __NEXT_DATA__ and are skipped. react.js and typescript follow the
+// same format as the confirmed-working vue.js path.
 const SEARCH_PATHS = [
   '/praca/vue.js;kw',
-  '/praca/vue;kw',
-  '/praca/javascript;kw',
-  '/praca/front%20end%20developer;kw',
+  '/praca/react.js;kw',
+  '/praca/typescript;kw',
+  '/praca/frontend-developer;kw',
 ]
 const MAX_PAGES_PER_SEARCH = 5
 
@@ -134,19 +139,6 @@ function buildRawJob(g: PracujGroup): RawJob | null {
   }
 }
 
-async function fetchPage(path: string, page: number): Promise<PracujGroup[]> {
-  const url = `https://it.pracuj.pl${path}${page > 1 ? `?pn=${page}` : ''}`
-  const html = await fetchPageHtml(url, { waitForSelector: 'script#__NEXT_DATA__' })
-  const data = extractNextData(html)
-  return findGroupedOffers(data) ?? []
-}
-
-const REQUEST_DELAY_MS = 250
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
 export const pracujScraper: JobScraper = {
   source: 'pracuj',
   displayName: 'Pracuj.pl',
@@ -158,14 +150,43 @@ export const pracujScraper: JobScraper = {
     const seen = new Set<string>()
 
     for (const path of SEARCH_PATHS) {
-      for (let page = 1; page <= MAX_PAGES_PER_SEARCH; page++) {
-        let groups: PracujGroup[]
-        try {
-          groups = await fetchPage(path, page)
-        } catch (e) {
-          errors.push(`${path} page ${page}: ${(e as Error).message}`)
-          break // stop paginating this search on error
+      // Build all page URLs for this search path upfront.
+      // Prepend the homepage as a warm-up so Pracuj sees natural navigation
+      // (homepage → search page 1 → page 2 …) within a single browser session.
+      const urls = [
+        'https://it.pracuj.pl',
+        ...Array.from({ length: MAX_PAGES_PER_SEARCH }, (_, i) =>
+          `https://it.pracuj.pl${path}${i > 0 ? `?pn=${i + 1}` : ''}`
+        ),
+      ]
+
+      let htmlPages: (string | null)[]
+      try {
+        htmlPages = await fetchPagesHtmlSequential(urls, {
+          waitForSelector: 'script#__NEXT_DATA__',
+          pageDelayMs: 400,
+        })
+      } catch (e) {
+        errors.push(`${path}: ${(e as Error).message}`)
+        continue
+      }
+
+      // Skip index 0 (homepage warm-up), process pages 1…N
+      for (let i = 1; i < htmlPages.length; i++) {
+        const html = htmlPages[i]
+        const pageNum = i  // 1-based
+        if (!html) {
+          errors.push(`${path} page ${pageNum}: browser navigation failed`)
+          break
         }
+        let data: unknown
+        try {
+          data = extractNextData(html)
+        } catch (e) {
+          errors.push(`${path} page ${pageNum}: ${(e as Error).message}`)
+          break
+        }
+        const groups = findGroupedOffers(data) ?? []
         if (!groups.length) break
 
         for (const g of groups) {
@@ -178,7 +199,6 @@ export const pracujScraper: JobScraper = {
             return { source: this.source, jobs, errors }
           }
         }
-        await sleep(REQUEST_DELAY_MS)
       }
     }
 

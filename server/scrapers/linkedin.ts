@@ -11,10 +11,9 @@ import type {
 // Detail comes from /jobs-guest/jobs/api/jobPosting/{id}, also HTML.
 //
 // We submit a few queries to widen the net (Vue explicit + frontend/JS broad).
-const KEYWORDS = ['vue', 'frontend developer', 'javascript']
+const KEYWORDS = ['vue', 'frontend developer']
 const LOCATION = 'Poland'
-const PAGES_PER_KEYWORD = 4         // 4 × 25 = 100 jobs per keyword max
-const PAGE_SIZE = 25
+const MAX_CARDS_PER_KEYWORD = 300    // LinkedIn caps search results at ~300–750 per query
 
 const HEADERS: HeadersInit = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -91,7 +90,8 @@ function buildRawJob(card: CardRaw, description: string): RawJob {
   }
 }
 
-const REQUEST_DELAY_MS = 400
+const LIST_DELAY_MS = 350     // between search-page fetches (no 429 observed here)
+const DETAIL_DELAY_MS = 800   // between detail fetches (429 happens here)
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -109,21 +109,24 @@ export const linkedinScraper: JobScraper = {
     const cards: CardRaw[] = []
 
     for (const kw of KEYWORDS) {
-      for (let p = 0; p < PAGES_PER_KEYWORD; p++) {
+      let start = 0
+      while (start < MAX_CARDS_PER_KEYWORD) {
+        let page: CardRaw[]
         try {
-          const html = await fetchSearchPage(kw, p * PAGE_SIZE, ctx.signal)
-          const page = parseSearchCards(html)
-          if (!page.length) break
-          for (const c of page) {
-            if (seen.has(c.id)) continue
-            seen.add(c.id)
-            cards.push(c)
-          }
+          const html = await fetchSearchPage(kw, start, ctx.signal)
+          page = parseSearchCards(html)
         } catch (e) {
-          errors.push(`search "${kw}" start=${p * PAGE_SIZE}: ${(e as Error).message}`)
+          errors.push(`search "${kw}" start=${start}: ${(e as Error).message}`)
           break
         }
-        await sleep(REQUEST_DELAY_MS)
+        if (!page.length) break
+        for (const c of page) {
+          if (seen.has(c.id)) continue
+          seen.add(c.id)
+          cards.push(c)
+        }
+        start += page.length   // advance by actual count returned, not a fixed stride
+        await sleep(LIST_DELAY_MS)
       }
     }
 
@@ -131,14 +134,16 @@ export const linkedinScraper: JobScraper = {
       try {
         const desc = await fetchDetailDescription(c.id, ctx.signal)
         jobs.push(buildRawJob(c, desc))
-        if (ctx.maxResults && jobs.length >= ctx.maxResults) {
-          return { source: this.source, jobs, errors }
-        }
       } catch (e) {
-        errors.push(`detail ${c.id}: ${(e as Error).message}`)
+        // 429 rate-limit on detail — save card without description rather than discarding it
+        const msg = (e as Error).message
+        if (!msg.includes('429')) errors.push(`detail ${c.id}: ${msg}`)
         jobs.push(buildRawJob(c, ''))
       }
-      await sleep(REQUEST_DELAY_MS)
+      if (ctx.maxResults && jobs.length >= ctx.maxResults) {
+        return { source: this.source, jobs, errors }
+      }
+      await sleep(DETAIL_DELAY_MS)
     }
 
     return { source: this.source, jobs, errors }

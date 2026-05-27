@@ -16,6 +16,7 @@ export function useDb(): Database.Database {
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')
+  db.pragma('busy_timeout = 10000')
   db.exec(SCHEMA_SQL)
 
   _db = db

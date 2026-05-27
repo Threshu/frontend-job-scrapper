@@ -52,6 +52,39 @@ export async function fetchPageHtml(url: string, opts: { waitForSelector?: strin
   }
 }
 
+// Navigate a sequence of URLs in a single browser page so the session, cookies,
+// and Referer headers persist between requests — important for sites (Pracuj.pl)
+// that fingerprint navigation flow. Returns HTML per URL; null on nav failure.
+export async function fetchPagesHtmlSequential(
+  urls: string[],
+  opts: { waitForSelector?: string; pageDelayMs?: number } = {},
+): Promise<(string | null)[]> {
+  const context = await ensureContext()
+  const page = await context.newPage()
+  const results: (string | null)[] = []
+  try {
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        if (opts.waitForSelector) {
+          await page.waitForSelector(opts.waitForSelector, { timeout: 15_000 }).catch(() => {})
+        } else {
+          await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
+        }
+        results.push(await page.content())
+      } catch {
+        results.push(null)
+      }
+      if (opts.pageDelayMs && i < urls.length - 1) {
+        await page.waitForTimeout(opts.pageDelayMs)
+      }
+    }
+  } finally {
+    await page.close()
+  }
+  return results
+}
+
 export async function closeBrowser(): Promise<void> {
   try { await _context?.close() } catch {}
   try { await _browser?.close() } catch {}

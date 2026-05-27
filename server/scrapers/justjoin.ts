@@ -141,11 +141,10 @@ function buildRawJob(detail: JjitDetailOffer): RawJob {
 }
 
 async function fetchPage(
-	cursor: number | null,
+	from: number,
 	signal?: AbortSignal,
 ): Promise<JjitListResponse> {
-	const url =
-		cursor == null ? `${BASE}/offers` : `${BASE}/offers?cursor=${cursor}`;
+	const url = from === 0 ? `${BASE}/offers` : `${BASE}/offers?from=${from}`;
 	const res = await fetch(url, { headers: HEADERS, signal });
 	if (!res.ok) throw new Error(`JJIT list ${url} → HTTP ${res.status}`);
 	return res.json() as Promise<JjitListResponse>;
@@ -166,7 +165,7 @@ async function fetchDetail(
 // Cap on number of pages walked per run. 200 pages × 10 offers/page = 2000
 // listings, well past the volume of fresh frontend jobs in Poland on a given day.
 const MAX_PAGES = 200;
-const REQUEST_DELAY_MS = 120;
+const REQUEST_DELAY_MS = 200;
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
@@ -182,23 +181,25 @@ export const justjoinScraper: JobScraper = {
 		const jobs: RawJob[] = [];
 		const seen = new Set<string>();
 
-		let cursor: number | null = null;
+		let from = 0;
+		let totalItems = Infinity;
 		let pages = 0;
 
-		while (pages < MAX_PAGES) {
+		while (from < totalItems && pages < MAX_PAGES) {
 			let page: JjitListResponse;
 			try {
-				page = await fetchPage(cursor, ctx.signal);
+				page = await fetchPage(from, ctx.signal);
 			} catch (e) {
 				errors.push(String((e as Error).message));
 				break;
 			}
 
-			let newOnPage = 0;
+			if (!page.data.length) break;
+			if (pages === 0) totalItems = page.meta.totalItems;
+
 			for (const offer of page.data) {
 				if (seen.has(offer.slug)) continue;
 				seen.add(offer.slug);
-				newOnPage++;
 				if (!looksFrontend(offer)) continue;
 				try {
 					const detail = await fetchDetail(offer.slug, ctx.signal);
@@ -212,17 +213,7 @@ export const justjoinScraper: JobScraper = {
 				await sleep(REQUEST_DELAY_MS);
 			}
 
-			const nextCursor = page.meta.next?.cursor ?? null;
-			if (nextCursor == null) break;
-			// If every offer on this page was already seen, the API is looping
-			// (JJIT candidate-api returns the same 10 results regardless of cursor).
-			if (newOnPage === 0) {
-				errors.push(
-					"JJIT pagination loop detected — API returns same page for every cursor, stopping early",
-				);
-				break;
-			}
-			cursor = nextCursor;
+			from += page.data.length;
 			pages++;
 			await sleep(REQUEST_DELAY_MS);
 		}

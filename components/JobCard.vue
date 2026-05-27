@@ -18,6 +18,9 @@ const SOURCE_LABEL: Record<string, string> = {
   pracuj: 'Pracuj',
   linkedin: 'LI',
   indeed: 'Indeed',
+  remotive: 'Remotive',
+  crossweb: 'Crossweb',
+  pracapl: 'praca.pl',
 }
 
 function fmtSalary(g: GroupDto) {
@@ -51,6 +54,18 @@ function highlightVueReact(skill: string): 'vue' | 'react' | 'angular' | 'svelte
 }
 
 const primaryListing = computed(() => props.group.listings[0])
+
+// One pill per source — NFJ (and others) can post the same job in N regions,
+// each with a unique sourceId. Pick the listing with the earliest firstSeenAt
+// so the link points to the "original" entry.
+const uniqueSourceListings = computed(() => {
+  const best = new Map<string, typeof props.group.listings[number]>()
+  for (const l of props.group.listings) {
+    const existing = best.get(l.source)
+    if (!existing || l.firstSeenAt < existing.firstSeenAt) best.set(l.source, l)
+  }
+  return Array.from(best.values())
+})
 
 const staleTooltip = computed(() => {
   const reasons = props.group.listings.map((l) => l.staleReason).filter(Boolean) as string[]
@@ -118,8 +133,8 @@ async function change(s: Status) {
 
     <div class="sources">
       <a
-        v-for="l in group.listings"
-        :key="l.id"
+        v-for="l in uniqueSourceListings"
+        :key="l.source"
         :href="l.url"
         target="_blank"
         rel="noopener"

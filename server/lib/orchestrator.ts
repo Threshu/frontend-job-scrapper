@@ -21,6 +21,8 @@ interface RunState {
   promise: Promise<OrchestratorRunResult>
   startedAt: string
   abort: AbortController
+  completed: OrchestratorRunResult['perSource']
+  total: number
 }
 
 let _running: RunState | null = null
@@ -31,6 +33,21 @@ export function isRunning(): boolean {
 
 export function currentRun(): { startedAt: string } | null {
   return _running ? { startedAt: _running.startedAt } : null
+}
+
+export function scrapeProgress(): {
+  running: boolean
+  startedAt: string | null
+  total: number
+  completed: OrchestratorRunResult['perSource']
+} {
+  if (!_running) return { running: false, startedAt: null, total: 0, completed: [] }
+  return {
+    running: true,
+    startedAt: _running.startedAt,
+    total: _running.total,
+    completed: [..._running.completed],
+  }
 }
 
 async function runOne(
@@ -69,13 +86,32 @@ export function runScrape(opts: { sources?: string[]; maxResultsPerSource?: numb
 
   const selected = SCRAPERS.filter((s) => !opts.sources || opts.sources.includes(s.source))
 
+  const state: RunState = { promise: null as unknown as Promise<OrchestratorRunResult>, startedAt, abort, completed: [], total: selected.length }
+
   const promise = (async () => {
     const ctx: ScrapeContext = { signal: abort.signal, maxResults: opts.maxResultsPerSource }
-    const perSource = await Promise.all(selected.map((s) => runOne(s, ctx, db)))
+
+    // Plain-fetch scrapers run in parallel; Playwright scrapers run sequentially
+    // to avoid sharing the browser context across concurrent page floods.
+    const normalScrapers = selected.filter((s) => !s.capabilities.needsBrowser)
+    const browserScrapers = selected.filter((s) => s.capabilities.needsBrowser)
+
+    const finish = (r: OrchestratorRunResult['perSource'][number]) => {
+      state.completed.push(r)
+      return r
+    }
+
+    const normalResults = await Promise.all(normalScrapers.map((s) => runOne(s, ctx, db).then(finish)))
+
+    const browserResults: typeof normalResults = []
+    for (const s of browserScrapers) {
+      browserResults.push(await runOne(s, ctx, db).then(finish))
+    }
+
     return {
       startedAt,
       finishedAt: new Date().toISOString(),
-      perSource,
+      perSource: [...normalResults, ...browserResults],
     }
   })().finally(async () => {
     _running = null
@@ -83,7 +119,8 @@ export function runScrape(opts: { sources?: string[]; maxResultsPerSource?: numb
     if (isBrowserOpen()) await closeBrowser().catch(() => {})
   })
 
-  _running = { promise, startedAt, abort }
+  state.promise = promise
+  _running = state
   return promise
 }
 

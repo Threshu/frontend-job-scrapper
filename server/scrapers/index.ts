@@ -8,6 +8,12 @@ import { remoteokScraper } from './remoteok'
 import { pracujScraper } from './pracuj'
 import { theProtocolScraper } from './theprotocol'
 import { indeedScraper } from './indeed'
+import { remotiveScraper } from './remotive'
+import { crosswebScraper } from './crossweb'
+// praca.pl keyword search does not distinguish Vue.js from the French word "vue"
+// — it returns warehouse workers, CNC operators, and school directors instead of
+// IT jobs. Disabled until a reliable IT-category URL is found.
+// import { pracaplScraper } from './pracapl'
 // solid.jobs and 4programmers.net both gate their job-list APIs behind
 // session tokens / CSRF and serve only a skeleton on the first paint. The
 // scrapers (server/scrapers/solidjobs.ts, fourprogrammers.ts) compile fine
@@ -32,4 +38,6 @@ export const SCRAPERS: JobScraper[] = [
   pracujScraper,
   theProtocolScraper,
   indeedScraper,
+  remotiveScraper,
+  crosswebScraper,
 ]
