@@ -70,7 +70,7 @@ const uniqueSourceListings = computed(() => {
 const staleTooltip = computed(() => {
   const reasons = props.group.listings.map((l) => l.staleReason).filter(Boolean) as string[]
   if (reasons.includes('unseen') && reasons.includes('aged')) return 'Zniknęło ze źródła i jest stare'
-  if (reasons.includes('unseen')) return 'Zniknęło ze źródła (niewidziane przy ostatnich scrape’ach)'
+  if (reasons.includes('unseen')) return "Zniknęło ze źródła (niewidziane przy ostatnich scrape'ach)"
   if (reasons.includes('aged')) return 'Stara data publikacji'
   return 'Nieaktualne'
 })
@@ -105,80 +105,177 @@ async function saveNotes() {
 async function change(s: Status) {
   await setStatus(props.group.id, s)
 }
+
+// Swipe gesture handling
+const cardInnerRef = ref<HTMLElement | null>(null)
+const swipeX = ref(0)
+const swipeStartX = ref(0)
+const swipeStartY = ref(0)
+const isPointerDown = ref(false)
+const isHorizontalSwipe = ref(false)
+const SWIPE_THRESHOLD = 90
+
+function onTouchStart(e: TouchEvent) {
+  swipeStartX.value = e.touches[0].clientX
+  swipeStartY.value = e.touches[0].clientY
+  isPointerDown.value = true
+  isHorizontalSwipe.value = false
+}
+
+function onTouchMoveHandler(e: TouchEvent) {
+  if (!isPointerDown.value) return
+  const dx = e.touches[0].clientX - swipeStartX.value
+  const dy = e.touches[0].clientY - swipeStartY.value
+
+  if (!isHorizontalSwipe.value) {
+    if (Math.abs(dy) > Math.abs(dx)) {
+      isPointerDown.value = false
+      return
+    }
+    if (Math.abs(dx) < 5) return
+    isHorizontalSwipe.value = true
+  }
+
+  e.preventDefault()
+  swipeX.value = dx
+}
+
+function onTouchEnd() {
+  const x = swipeX.value
+  isPointerDown.value = false
+  isHorizontalSwipe.value = false
+  swipeX.value = 0
+
+  if (x >= SWIPE_THRESHOLD) {
+    void change('applied')
+  } else if (x <= -SWIPE_THRESHOLD) {
+    void change('rejected')
+  }
+}
+
+onMounted(() => {
+  cardInnerRef.value?.addEventListener('touchmove', onTouchMoveHandler, { passive: false })
+})
+
+onUnmounted(() => {
+  cardInnerRef.value?.removeEventListener('touchmove', onTouchMoveHandler)
+})
+
+const swipeStyle = computed(() => ({
+  transform: `translateX(${swipeX.value}px)`,
+  transition: isPointerDown.value ? 'none' : 'transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+}))
+
+const swipePct = computed(() => Math.min(Math.abs(swipeX.value) / SWIPE_THRESHOLD, 1))
+const swipeLocked = computed(() => Math.abs(swipeX.value) >= SWIPE_THRESHOLD)
+
+const swipeBgAppliedStyle = computed(() => ({
+  opacity: swipeX.value > 0 ? swipePct.value : 0,
+  background: swipeLocked.value ? 'rgba(34, 197, 94, 0.55)' : 'rgba(34, 197, 94, 0.25)',
+}))
+
+const swipeBgRejectedStyle = computed(() => ({
+  opacity: swipeX.value < 0 ? swipePct.value : 0,
+  background: swipeLocked.value ? 'rgba(239, 68, 68, 0.55)' : 'rgba(239, 68, 68, 0.25)',
+}))
+
+const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
 </script>
 
 <template>
   <article class="card" :class="{ 'is-vue': group.hasVue, 'is-stale': group.isStale }">
-    <header class="head">
-      <div class="title-block">
-        <h2 class="title">{{ group.canonicalTitle }}</h2>
-        <p class="company">{{ group.canonicalCompany }}</p>
+
+    <!-- Swipe action backgrounds -->
+    <div class="swipe-bg swipe-bg-applied" :style="swipeBgAppliedStyle">
+      <span class="swipe-icon" :style="{ transform: `scale(${swipeIconScale})` }">✓</span>
+      <span class="swipe-label">Zaaplikowane</span>
+    </div>
+    <div class="swipe-bg swipe-bg-rejected" :style="swipeBgRejectedStyle">
+      <span class="swipe-label">Odrzucone</span>
+      <span class="swipe-icon" :style="{ transform: `scale(${swipeIconScale})` }">✗</span>
+    </div>
+
+    <!-- Card content -->
+    <div
+      ref="cardInnerRef"
+      class="card-inner"
+      :style="swipeStyle"
+      @touchstart.passive="onTouchStart"
+      @touchend.passive="onTouchEnd"
+      @touchcancel.passive="onTouchEnd"
+    >
+      <header class="head">
+        <div class="title-block">
+          <h2 class="title">{{ group.canonicalTitle }}</h2>
+          <p class="company">{{ group.canonicalCompany }}</p>
+        </div>
+        <div class="meta">
+          <span v-if="group.isStale" class="pill pill-stale" :title="staleTooltip">Archiwum</span>
+          <span v-if="group.vueInTitle" class="pill pill-vue-strong">Vue w tytule</span>
+          <span v-else-if="group.hasVue" class="pill pill-vue">Vue w opisie</span>
+          <span v-if="group.hasReact" class="pill pill-react">React</span>
+          <span v-if="group.hasAngular" class="pill pill-angular">Angular</span>
+          <span class="status" :class="STATUS_COLOR[group.status]">{{ STATUS_LABEL[group.status as Status] ?? group.status }}</span>
+        </div>
+      </header>
+
+      <div class="sub">
+        <span v-if="primaryListing?.location">{{ primaryListing.location }}</span>
+        <span v-if="primaryListing?.remote" class="muted">· remote</span>
+        <span v-if="primaryListing?.experience" class="muted">· {{ primaryListing.experience }}</span>
+        <span v-if="fmtSalary(group)" class="salary">· {{ fmtSalary(group) }}</span>
       </div>
-      <div class="meta">
-        <span v-if="group.isStale" class="pill pill-stale" :title="staleTooltip">Archiwum</span>
-        <span v-if="group.vueInTitle" class="pill pill-vue-strong">Vue w tytule</span>
-        <span v-else-if="group.hasVue" class="pill pill-vue">Vue w opisie</span>
-        <span v-if="group.hasReact" class="pill pill-react">React</span>
-        <span v-if="group.hasAngular" class="pill pill-angular">Angular</span>
-        <span class="status" :class="STATUS_COLOR[group.status]">{{ STATUS_LABEL[group.status as Status] ?? group.status }}</span>
+
+      <div class="sources">
+        <a
+          v-for="l in uniqueSourceListings"
+          :key="l.source"
+          :href="l.url"
+          target="_blank"
+          rel="noopener"
+          class="source-pill"
+        >{{ SOURCE_LABEL[l.source] ?? l.source }}</a>
       </div>
-    </header>
 
-    <div class="sub">
-      <span v-if="primaryListing?.location">{{ primaryListing.location }}</span>
-      <span v-if="primaryListing?.remote" class="muted">· remote</span>
-      <span v-if="primaryListing?.experience" class="muted">· {{ primaryListing.experience }}</span>
-      <span v-if="fmtSalary(group)" class="salary">· {{ fmtSalary(group) }}</span>
-    </div>
-
-    <div class="sources">
-      <a
-        v-for="l in uniqueSourceListings"
-        :key="l.source"
-        :href="l.url"
-        target="_blank"
-        rel="noopener"
-        class="source-pill"
-      >{{ SOURCE_LABEL[l.source] ?? l.source }}</a>
-    </div>
-
-    <div v-if="allSkills.length" class="skills">
-      <span
-        v-for="s in allSkills"
-        :key="s"
-        class="skill"
-        :class="highlightVueReact(s) ? `skill-${highlightVueReact(s)}` : ''"
-      >{{ s }}</span>
-    </div>
-
-    <div v-if="expanded" class="expanded">
-      <p class="description">{{ description.slice(0, 1500) }}<span v-if="description.length > 1500">…</span></p>
-
-      <div class="actions">
-        <span class="actions-label">Zmień status:</span>
-        <button
-          v-for="s in STATUSES"
+      <div v-if="allSkills.length" class="skills">
+        <span
+          v-for="s in allSkills"
           :key="s"
-          class="status-btn"
-          :class="{ active: group.status === s }"
-          @click="change(s as Status)"
-        >{{ STATUS_LABEL[s as Status] }}</button>
+          class="skill"
+          :class="highlightVueReact(s) ? `skill-${highlightVueReact(s)}` : ''"
+        >{{ s }}</span>
       </div>
 
-      <div class="notes">
-        <label>
-          <span>Notatki</span>
-          <textarea v-model="notesDraft" rows="3" placeholder="Twoje notatki o ofercie..." />
-        </label>
-        <button class="btn-save" :disabled="savingNotes || notesDraft === group.notes" @click="saveNotes">
-          {{ savingNotes ? 'Zapisuję...' : 'Zapisz' }}
-        </button>
+      <div v-if="expanded" class="expanded">
+        <p class="description">{{ description.slice(0, 1500) }}<span v-if="description.length > 1500">…</span></p>
+
+        <div class="actions">
+          <span class="actions-label">Zmień status:</span>
+          <button
+            v-for="s in STATUSES"
+            :key="s"
+            class="status-btn"
+            :class="{ active: group.status === s }"
+            @click="change(s as Status)"
+          >{{ STATUS_LABEL[s as Status] }}</button>
+        </div>
+
+        <div class="notes">
+          <label>
+            <span>Notatki</span>
+            <textarea v-model="notesDraft" rows="3" placeholder="Twoje notatki o ofercie..." />
+          </label>
+          <button class="btn-save" :disabled="savingNotes || notesDraft === group.notes" @click="saveNotes">
+            {{ savingNotes ? 'Zapisuję...' : 'Zapisz' }}
+          </button>
+        </div>
       </div>
+
+      <button class="expand-toggle" @click="expanded = !expanded">
+        {{ expanded ? '↑ Zwiń' : '↓ Pokaż szczegóły' }}
+      </button>
     </div>
 
-    <button class="expand-toggle" @click="expanded = !expanded">
-      {{ expanded ? '↑ Zwiń' : '↓ Pokaż szczegóły' }}
-    </button>
   </article>
 </template>
 
@@ -187,12 +284,54 @@ async function change(s: Status) {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 0.6rem;
-  padding: 1rem 1.2rem;
   margin-bottom: 0.8rem;
+  position: relative;
+  overflow: hidden;
 }
 .card.is-vue { border-left: 3px solid var(--vue); }
 .card.is-stale { opacity: 0.55; }
 .card.is-stale:hover { opacity: 0.85; }
+
+.swipe-bg {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  pointer-events: none;
+  border-radius: inherit;
+  transition: background 0.1s ease;
+}
+.swipe-bg-applied {
+  padding-left: 1.5rem;
+  justify-content: flex-start;
+  color: #4ade80;
+}
+.swipe-bg-rejected {
+  padding-right: 1.5rem;
+  justify-content: flex-end;
+  color: #fca5a5;
+}
+.swipe-icon {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  display: inline-block;
+  transition: transform 0.1s ease;
+}
+.swipe-label {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.card-inner {
+  padding: 1rem 1.2rem;
+  position: relative;
+  z-index: 1;
+  background: var(--card);
+  will-change: transform;
+}
 
 .head {
   display: flex;
