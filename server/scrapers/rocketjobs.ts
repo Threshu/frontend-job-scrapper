@@ -3,11 +3,9 @@ import type {
   Experience, ContractType, SalaryPeriod,
 } from './types'
 
-// Rocketjobs.pl is owned by the same group as JustJoin.it and exposes the
-// same `/api/candidate-api/offers` endpoint shape — but unlike JJIT it lists
-// jobs across all industries (healthcare, sales, banking, IT, …). We filter
-// down to IT/frontend candidates the same way JJIT does: category key,
-// title, or skill keywords.
+// Rocketjobs.pl exposes a JSON API at /api/candidate-api/offers but covers
+// all industries. We filter down to IT/frontend by category key, title, or
+// skill keywords and build jobs entirely from list data (no detail fetch).
 const BASE = 'https://rocketjobs.pl/api/candidate-api'
 
 const IT_CATEGORY_PREFIXES = ['it-', 'tech', 'developer', 'engineer', 'programowanie']
@@ -33,12 +31,6 @@ interface RjListOffer {
 interface RjListResponse {
   data: RjListOffer[]
   meta: { from: number; totalItems: number; next?: { cursor: number | null } }
-}
-
-interface RjDetailOffer extends RjListOffer {
-  body: string
-  applyUrl?: string | null
-  isActive: boolean
 }
 
 const HEADERS: HeadersInit = {
@@ -81,53 +73,28 @@ function pickSalary(o: RjListOffer): { min?: number; max?: number; currency?: st
   }
 }
 
-function buildRawJob(d: RjDetailOffer): RawJob {
-  const sal = pickSalary(d)
+function buildRawJob(o: RjListOffer): RawJob {
+  const sal = pickSalary(o)
   return {
     source: 'rocketjobs',
-    sourceId: d.slug,
-    url: `https://rocketjobs.pl/offers/${d.slug}`,
-    title: d.title,
-    company: d.companyName,
-    location: d.city ?? undefined,
-    remote: d.workplaceType === 'remote' || d.workplaceType === 'partly_remote',
+    sourceId: o.slug,
+    url: `https://rocketjobs.pl/offers/${o.slug}`,
+    title: o.title,
+    company: o.companyName,
+    location: o.city ?? undefined,
+    remote: o.workplaceType === 'remote' || o.workplaceType === 'partly_remote',
     salaryMin: sal.min,
     salaryMax: sal.max,
     currency: sal.currency,
     salaryPeriod: sal.period,
     contractType: sal.contract,
-    experience: mapExperience(d.experienceLevel),
-    description: d.body ?? '',
-    skills: [
-      ...d.requiredSkills.map((s) => s.name),
-      ...d.niceToHaveSkills.map((s) => s.name),
-    ],
-    postedAt: d.publishedAt,
-  }
-}
-
-function buildRawJobFromList(d: RjListOffer): RawJob {
-  const sal = pickSalary(d)
-  return {
-    source: 'rocketjobs',
-    sourceId: d.slug,
-    url: `https://rocketjobs.pl/offers/${d.slug}`,
-    title: d.title,
-    company: d.companyName,
-    location: d.city ?? undefined,
-    remote: d.workplaceType === 'remote' || d.workplaceType === 'partly_remote',
-    salaryMin: sal.min,
-    salaryMax: sal.max,
-    currency: sal.currency,
-    salaryPeriod: sal.period,
-    contractType: sal.contract,
-    experience: mapExperience(d.experienceLevel),
+    experience: mapExperience(o.experienceLevel),
     description: '',
     skills: [
-      ...d.requiredSkills.map((s) => s.name),
-      ...d.niceToHaveSkills.map((s) => s.name),
+      ...o.requiredSkills.map((s) => s.name),
+      ...o.niceToHaveSkills.map((s) => s.name),
     ],
-    postedAt: d.publishedAt,
+    postedAt: o.publishedAt,
   }
 }
 
@@ -138,14 +105,8 @@ async function fetchPage(from: number, signal?: AbortSignal): Promise<RjListResp
   return res.json() as Promise<RjListResponse>
 }
 
-async function fetchDetail(slug: string, signal?: AbortSignal): Promise<RjDetailOffer> {
-  const res = await fetch(`${BASE}/offers/${slug}`, { headers: HEADERS, signal })
-  if (!res.ok) throw new Error(`RJ detail ${slug} → HTTP ${res.status}`)
-  return res.json() as Promise<RjDetailOffer>
-}
-
 const MAX_PAGES = 100
-const REQUEST_DELAY_MS = 400
+const PAGE_DELAY_MS = 400
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -181,27 +142,15 @@ export const rocketjobsScraper: JobScraper = {
         if (seen.has(offer.slug)) continue
         seen.add(offer.slug)
         if (!looksFrontend(offer)) continue
-        try {
-          const detail = await fetchDetail(offer.slug, ctx.signal)
-          if (detail.isActive === false) continue
-          jobs.push(buildRawJob(detail))
-          if (ctx.maxResults && jobs.length >= ctx.maxResults) {
-            return { source: this.source, jobs, errors }
-          }
-        } catch (e) {
-          errors.push(`detail ${offer.slug}: ${(e as Error).message}`)
-          // Fall back to list data so the job is not lost
-          jobs.push(buildRawJobFromList(offer))
-          if (ctx.maxResults && jobs.length >= ctx.maxResults) {
-            return { source: this.source, jobs, errors }
-          }
+        jobs.push(buildRawJob(offer))
+        if (ctx.maxResults && jobs.length >= ctx.maxResults) {
+          return { source: this.source, jobs, errors }
         }
-        await sleep(REQUEST_DELAY_MS)
       }
 
       from += page.data.length
       pages++
-      await sleep(REQUEST_DELAY_MS)
+      await sleep(PAGE_DELAY_MS)
     }
 
     return { source: this.source, jobs, errors }
