@@ -8,6 +8,57 @@ export interface JobFilters {
 	includeStale: boolean;
 }
 
+export type SortBy = "relevance" | "newest";
+
+export const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+	{ value: "relevance", label: "Trafność" },
+	{ value: "newest", label: "Najnowsze" },
+];
+
+function bestPostedMs(g: GroupDto): number {
+	return g.listings
+		.filter((l) => l.postedAt)
+		.reduce((max, l) => Math.max(max, new Date(l.postedAt!).getTime()), 0);
+}
+
+function bestSeenMs(g: GroupDto): number {
+	return g.listings.reduce(
+		(max, l) => Math.max(max, new Date(l.firstSeenAt).getTime()),
+		0,
+	);
+}
+
+function relevanceScore(g: GroupDto): number {
+	let score = 0;
+
+	// Vue w tytule = rola stricte dla Vue devów — najsilniejszy sygnał
+	if (g.vueInTitle) score += 50;
+	else if (g.hasVue) score += 15;
+
+	// Remote = szersza pula kandydatów, ale też więcej możliwości
+	if (g.listings.some((l) => l.remote)) score += 12;
+
+	// Pojawia się na wielu portalach = bardziej eksponowane ogłoszenie
+	score += Math.min((g.listings.length - 1) * 5, 15);
+
+	// Widełki = uczciwy pracodawca, który nie ukrywa budżetu
+	if (g.bestSalary?.max != null) score += 8;
+
+	// Świeżość (0–30 pkt): im nowsze postedAt, tym lepiej
+	const postedMs = bestPostedMs(g);
+	if (postedMs > 0) {
+		const daysAgo = (Date.now() - postedMs) / 86_400_000;
+		score += Math.max(0, 30 - daysAgo);
+	} else {
+		// fallback na firstSeenAt gdy portal nie podaje daty publikacji
+		const seenMs = bestSeenMs(g);
+		const daysAgo = (Date.now() - seenMs) / 86_400_000;
+		score += Math.max(0, 20 - daysAgo);
+	}
+
+	return score;
+}
+
 export const STATUSES = [
 	"new",
 	"interested",
@@ -39,8 +90,21 @@ export function useJobs() {
 		search: "",
 		includeStale: false,
 	}));
+	const sortBy = useState<SortBy>("sortBy", () => "relevance");
 	const groups = useState<GroupDto[]>("groups", () => []);
 	const loading = useState<boolean>("groupsLoading", () => false);
+
+	const sortedGroups = computed(() => {
+		const list = [...groups.value];
+		if (sortBy.value === "newest") {
+			return list.sort((a, b) => {
+				const aMs = bestPostedMs(a) || bestSeenMs(a);
+				const bMs = bestPostedMs(b) || bestSeenMs(b);
+				return bMs - aMs;
+			});
+		}
+		return list.sort((a, b) => relevanceScore(b) - relevanceScore(a));
+	});
 
 	async function refresh() {
 		loading.value = true;
@@ -94,7 +158,7 @@ export function useJobs() {
 		if (g) g.notes = notes;
 	}
 
-	return { activeTab, filters, groups, loading, refresh, setStatus, setNotes };
+	return { activeTab, filters, sortBy, groups, sortedGroups, loading, refresh, setStatus, setNotes };
 }
 
 export function useScrape() {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-	const { activeTab, groups, loading, refresh } = useJobs();
+	const { activeTab, sortedGroups, loading, refresh } = useJobs();
 	const { running, trigger } = useScrape();
 	const { newCount, peek, markVisited } = useNewCount();
 	const { notifySupport, requestPermission, notify, permission } =
@@ -298,7 +298,7 @@
 
 		<section class="results">
 			<p v-if="loading" class="status">Ładuję...</p>
-			<template v-else-if="!groups.length">
+			<template v-else-if="!sortedGroups.length">
 				<p v-if="activeTab === 'active'" class="status">
 					Brak ofert. Kliknij &quot;Scrapuj teraz&quot; żeby pobrać dane z
 					portali.
@@ -310,7 +310,7 @@
 					Brak odrzuconych ofert.
 				</p>
 			</template>
-			<JobCard v-for="g in groups" :key="g.id" :group="g" />
+			<JobCard v-for="g in sortedGroups" :key="g.id" :group="g" />
 		</section>
 	</main>
 </template>

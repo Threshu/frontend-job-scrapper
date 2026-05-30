@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { STATUSES, STATUS_LABEL, type Status } from '~/composables/useJobs'
+import { STATUSES, STATUS_LABEL, SORT_OPTIONS, type Status } from '~/composables/useJobs'
 
 interface SourceMeta { source: string; displayName: string }
 
-const { filters, refresh } = useJobs()
+const { filters, sortBy, refresh } = useJobs()
 const { data: sources } = await useFetch<SourceMeta[]>('/api/sources')
 
 function apply() { refresh() }
@@ -40,6 +40,13 @@ function apply() { refresh() }
     <label class="field grow">
       <span>Szukaj</span>
       <input v-model="filters.search" type="text" placeholder="firma, tytuł..." @keyup.enter="apply">
+    </label>
+
+    <label class="field">
+      <span>Sortowanie</span>
+      <select v-model="sortBy">
+        <option v-for="o in SORT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
     </label>
 
     <button class="btn" @click="apply">Filtruj</button>
