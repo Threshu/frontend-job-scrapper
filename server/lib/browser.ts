@@ -85,6 +85,42 @@ export async function fetchPagesHtmlSequential(
   return results
 }
 
+// Navigate a sequence of URLs in a single browser page and return window.__NEXT_DATA__
+// for each URL by evaluating it in the page context. More reliable than HTML parsing
+// because it gets the runtime value regardless of how the script tag is structured.
+// Returns null for pages where __NEXT_DATA__ is not present after load.
+export async function fetchPagesNextDataSequential(
+  urls: string[],
+  opts: { pageDelayMs?: number } = {},
+): Promise<(unknown | null)[]> {
+  const context = await ensureContext()
+  const page = await context.newPage()
+  const results: (unknown | null)[] = []
+  try {
+    for (let i = 0; i < urls.length; i++) {
+      try {
+        await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        // Wait until window.__NEXT_DATA__ is populated or timeout silently
+        await page
+          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 15_000 })
+          .catch(() => {})
+        const data = await page.evaluate(
+          () => (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
+        )
+        results.push(data)
+      } catch {
+        results.push(null)
+      }
+      if (opts.pageDelayMs && i < urls.length - 1) {
+        await page.waitForTimeout(opts.pageDelayMs)
+      }
+    }
+  } finally {
+    await page.close()
+  }
+  return results
+}
+
 export async function closeBrowser(): Promise<void> {
   try { await _context?.close() } catch {}
   try { await _browser?.close() } catch {}

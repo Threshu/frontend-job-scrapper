@@ -106,6 +106,31 @@ function buildRawJob(d: RjDetailOffer): RawJob {
   }
 }
 
+function buildRawJobFromList(d: RjListOffer): RawJob {
+  const sal = pickSalary(d)
+  return {
+    source: 'rocketjobs',
+    sourceId: d.slug,
+    url: `https://rocketjobs.pl/offers/${d.slug}`,
+    title: d.title,
+    company: d.companyName,
+    location: d.city ?? undefined,
+    remote: d.workplaceType === 'remote' || d.workplaceType === 'partly_remote',
+    salaryMin: sal.min,
+    salaryMax: sal.max,
+    currency: sal.currency,
+    salaryPeriod: sal.period,
+    contractType: sal.contract,
+    experience: mapExperience(d.experienceLevel),
+    description: '',
+    skills: [
+      ...d.requiredSkills.map((s) => s.name),
+      ...d.niceToHaveSkills.map((s) => s.name),
+    ],
+    postedAt: d.publishedAt,
+  }
+}
+
 async function fetchPage(from: number, signal?: AbortSignal): Promise<RjListResponse> {
   const url = from === 0 ? `${BASE}/offers` : `${BASE}/offers?from=${from}`
   const res = await fetch(url, { headers: HEADERS, signal })
@@ -165,6 +190,11 @@ export const rocketjobsScraper: JobScraper = {
           }
         } catch (e) {
           errors.push(`detail ${offer.slug}: ${(e as Error).message}`)
+          // Fall back to list data so the job is not lost
+          jobs.push(buildRawJobFromList(offer))
+          if (ctx.maxResults && jobs.length >= ctx.maxResults) {
+            return { source: this.source, jobs, errors }
+          }
         }
         await sleep(REQUEST_DELAY_MS)
       }

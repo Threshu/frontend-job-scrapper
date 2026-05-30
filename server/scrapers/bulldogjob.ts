@@ -20,9 +20,21 @@ const SLUG_PAGES = [
 
 const HEADERS: HeadersInit = {
 	"User-Agent":
-		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
-	Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-	"Accept-Language": "pl,en;q=0.8",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+	Accept:
+		"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+	"Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+	"Accept-Encoding": "gzip, deflate, br",
+	"Cache-Control": "max-age=0",
+	"Sec-Ch-Ua":
+		'"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+	"Sec-Ch-Ua-Mobile": "?0",
+	"Sec-Ch-Ua-Platform": '"Windows"',
+	"Sec-Fetch-Dest": "document",
+	"Sec-Fetch-Mode": "navigate",
+	"Sec-Fetch-Site": "same-origin",
+	"Sec-Fetch-User": "?1",
+	"Upgrade-Insecure-Requests": "1",
 };
 
 interface BdListJob {
@@ -143,8 +155,13 @@ function pickSalary(d: BdJobDetail): {
 	return {};
 }
 
-async function fetchHtml(url: string, signal?: AbortSignal): Promise<string> {
-	const res = await fetch(url, { headers: HEADERS, signal });
+async function fetchHtml(
+	url: string,
+	signal?: AbortSignal,
+	referer?: string,
+): Promise<string> {
+	const headers = referer ? { ...HEADERS, Referer: referer } : HEADERS;
+	const res = await fetch(url, { headers, signal });
 	if (!res.ok) throw new Error(`GET ${url} → HTTP ${res.status}`);
 	return res.text();
 }
@@ -172,7 +189,7 @@ async function fetchJobDetail(
 	signal?: AbortSignal,
 ): Promise<{ job: BdJobDetail; companyName?: string }> {
 	const url = `https://bulldogjob.com/companies/jobs/${jobId}`;
-	const html = await fetchHtml(url, signal);
+	const html = await fetchHtml(url, signal, "https://bulldogjob.com/companies/jobs");
 	const data = extractNextData(html) as NextDataShape;
 	const apollo = data.props?.pageProps?.__APOLLO_STATE__ ?? {};
 	const jobKey = `Job:${jobId}`;

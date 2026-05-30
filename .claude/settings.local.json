@@ -85,7 +85,9 @@
       "Bash(curl -s -L \"https://crossweb.pl/bob/bob.js.php/?t=2&p=2&d=9953,9934,9916,9910,9909,9908,9889,9891,9872,9865,9605,\" -H \"User-Agent: Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 Chrome/120.0 Safari/537.36\" -H \"Referer: https://crossweb.pl/en/job/job-offers/\")",
       "PowerShell(New-Item *)",
       "Bash(npx nuxi *)",
-      "Bash(node_modules\\\\.bin\\\\nuxt typecheck *)"
+      "Bash(node_modules\\\\.bin\\\\nuxt typecheck *)",
+      "Bash(npx --yes vue-tsc --noEmit)",
+      "Bash(git stash *)"
     ]
   }
 }

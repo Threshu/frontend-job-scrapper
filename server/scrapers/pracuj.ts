@@ -3,7 +3,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience,
 } from './types'
-import { fetchPagesHtmlSequential } from '../lib/browser'
+import { fetchPagesNextDataSequential } from '../lib/browser'
 
 // Pracuj.pl serves SSR pages with everything we need embedded in
 // __NEXT_DATA__. No detail fetch required — `jobDescription` is already on
@@ -46,12 +46,6 @@ interface PracujGroup {
   positionLevels?: string[]
   typesOfContract?: string[]
   offers?: PracujOffer[]
-}
-
-function extractNextData(html: string): unknown {
-  const m = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/)
-  if (!m) throw new Error('__NEXT_DATA__ not found')
-  return JSON.parse(m[1])
 }
 
 function findGroupedOffers(obj: unknown): PracujGroup[] | null {
@@ -160,30 +154,20 @@ export const pracujScraper: JobScraper = {
         ),
       ]
 
-      let htmlPages: (string | null)[]
+      let dataPages: (unknown | null)[]
       try {
-        htmlPages = await fetchPagesHtmlSequential(urls, {
-          waitForSelector: 'script#__NEXT_DATA__',
-          pageDelayMs: 400,
-        })
+        dataPages = await fetchPagesNextDataSequential(urls, { pageDelayMs: 400 })
       } catch (e) {
         errors.push(`${path}: ${(e as Error).message}`)
         continue
       }
 
       // Skip index 0 (homepage warm-up), process pages 1…N
-      for (let i = 1; i < htmlPages.length; i++) {
-        const html = htmlPages[i]
+      for (let i = 1; i < dataPages.length; i++) {
+        const data = dataPages[i]
         const pageNum = i  // 1-based
-        if (!html) {
-          errors.push(`${path} page ${pageNum}: browser navigation failed`)
-          break
-        }
-        let data: unknown
-        try {
-          data = extractNextData(html)
-        } catch (e) {
-          errors.push(`${path} page ${pageNum}: ${(e as Error).message}`)
+        if (!data) {
+          errors.push(`${path} page ${pageNum}: __NEXT_DATA__ not found`)
           break
         }
         const groups = findGroupedOffers(data) ?? []
