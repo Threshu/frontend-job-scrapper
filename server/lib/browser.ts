@@ -8,14 +8,19 @@ let _browser: Browser | null = null
 let _context: BrowserContext | null = null
 
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
 async function ensureContext(): Promise<BrowserContext> {
   if (_context) return _context
   if (!_browser) {
     _browser = await chromium.launch({
       headless: true,
-      args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+      args: [
+        '--disable-blink-features=AutomationControlled',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+      ],
     })
   }
   _context = await _browser.newContext({
@@ -23,12 +28,30 @@ async function ensureContext(): Promise<BrowserContext> {
     locale: 'pl-PL',
     timezoneId: 'Europe/Warsaw',
     viewport: { width: 1280, height: 800 },
-    extraHTTPHeaders: { 'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8' },
+    extraHTTPHeaders: { 'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7' },
   })
-  // Strip the `navigator.webdriver` flag — basic anti-anti-bot. Cloudflare's
-  // default challenge passes once we look like a normal browser.
+  // Anti-bot patches applied to every page in this context.
+  // These make headless Chromium look like a normal Chrome install to
+  // Cloudflare's JS challenge and similar bot-detection scripts.
   await _context.addInitScript(() => {
+    // 1. Remove webdriver flag
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+
+    // 2. Fake the chrome runtime object (absent in headless Chromium)
+    ;(window as unknown as Record<string, unknown>).chrome = { runtime: {}, app: { isInstalled: false } }
+
+    // 3. Fake a non-zero plugins list (headless has 0)
+    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] })
+
+    // 4. Consistent languages
+    Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl', 'en-US', 'en'] })
+
+    // 5. Permissions API — return 'default' for notifications (headless returns 'denied')
+    const origQuery = navigator.permissions.query.bind(navigator.permissions)
+    navigator.permissions.query = (desc: PermissionDescriptor) =>
+      desc.name === 'notifications'
+        ? Promise.resolve({ state: 'default' } as unknown as PermissionStatus)
+        : origQuery(desc)
   })
   return _context
 }
@@ -104,8 +127,10 @@ export async function fetchPagesNextDataSequential(
     for (let i = 0; i < urls.length; i++) {
       try {
         await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
+        // Wait up to 25s for __NEXT_DATA__ — Cloudflare challenge can take ~10s to
+        // solve and redirect before the actual page (with __NEXT_DATA__) loads.
         await page
-          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 15_000 })
+          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 25_000 })
           .catch(() => {})
         const { nextData, title } = await page.evaluate(() => ({
           nextData: (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
