@@ -3,7 +3,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience,
 } from './types'
-import { fetchPagesNextDataSequential } from '../lib/browser'
+import { fetchPagesNextDataSequential, type NextDataResult } from '../lib/browser'
 
 // Pracuj.pl serves SSR pages with everything we need embedded in
 // __NEXT_DATA__. No detail fetch required — `jobDescription` is already on
@@ -148,13 +148,13 @@ export const pracujScraper: JobScraper = {
       // Prepend the homepage as a warm-up so Pracuj sees natural navigation
       // (homepage → search page 1 → page 2 …) within a single browser session.
       const urls = [
-        'https://it.pracuj.pl',
+        'https://www.pracuj.pl',
         ...Array.from({ length: MAX_PAGES_PER_SEARCH }, (_, i) =>
-          `https://it.pracuj.pl${path}${i > 0 ? `?pn=${i + 1}` : ''}`
+          `https://www.pracuj.pl${path}${i > 0 ? `?pn=${i + 1}` : ''}`
         ),
       ]
 
-      let dataPages: (unknown | null)[]
+      let dataPages: NextDataResult[]
       try {
         dataPages = await fetchPagesNextDataSequential(urls, { pageDelayMs: 400 })
       } catch (e) {
@@ -164,10 +164,11 @@ export const pracujScraper: JobScraper = {
 
       // Skip index 0 (homepage warm-up), process pages 1…N
       for (let i = 1; i < dataPages.length; i++) {
-        const data = dataPages[i]
+        const { data, pageTitle } = dataPages[i]
         const pageNum = i  // 1-based
         if (!data) {
-          errors.push(`${path} page ${pageNum}: __NEXT_DATA__ not found`)
+          const hint = pageTitle ? ` (page: "${pageTitle}")` : ''
+          errors.push(`${path} page ${pageNum}: __NEXT_DATA__ not found${hint}`)
           break
         }
         const groups = findGroupedOffers(data) ?? []

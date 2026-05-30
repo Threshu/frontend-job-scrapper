@@ -85,31 +85,35 @@ export async function fetchPagesHtmlSequential(
   return results
 }
 
+export interface NextDataResult {
+  data: unknown | null
+  pageTitle?: string
+}
+
 // Navigate a sequence of URLs in a single browser page and return window.__NEXT_DATA__
-// for each URL by evaluating it in the page context. More reliable than HTML parsing
-// because it gets the runtime value regardless of how the script tag is structured.
-// Returns null for pages where __NEXT_DATA__ is not present after load.
+// for each URL via page.evaluate(). Returns { data: null, pageTitle } when not found
+// so callers can log what the page actually showed (challenge page vs real content).
 export async function fetchPagesNextDataSequential(
   urls: string[],
   opts: { pageDelayMs?: number } = {},
-): Promise<(unknown | null)[]> {
+): Promise<NextDataResult[]> {
   const context = await ensureContext()
   const page = await context.newPage()
-  const results: (unknown | null)[] = []
+  const results: NextDataResult[] = []
   try {
     for (let i = 0; i < urls.length; i++) {
       try {
         await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
-        // Wait until window.__NEXT_DATA__ is populated or timeout silently
         await page
           .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 15_000 })
           .catch(() => {})
-        const data = await page.evaluate(
-          () => (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
-        )
-        results.push(data)
+        const { nextData, title } = await page.evaluate(() => ({
+          nextData: (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
+          title: document.title,
+        }))
+        results.push({ data: nextData, pageTitle: title })
       } catch {
-        results.push(null)
+        results.push({ data: null })
       }
       if (opts.pageDelayMs && i < urls.length - 1) {
         await page.waitForTimeout(opts.pageDelayMs)

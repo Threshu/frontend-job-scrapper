@@ -51,7 +51,11 @@ function mapLevel(text: string): Experience | undefined {
 }
 
 async function fetchHtml(url: string, signal?: AbortSignal): Promise<string> {
-  const res = await fetch(url, { headers: HEADERS, signal })
+  let res = await fetch(url, { headers: HEADERS, signal })
+  if (res.status >= 500) {
+    await sleep(2000)
+    res = await fetch(url, { headers: HEADERS, signal })
+  }
   if (!res.ok) throw new Error(`GET ${url} → HTTP ${res.status}`)
   return res.text()
 }
