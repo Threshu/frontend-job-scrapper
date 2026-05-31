@@ -4,8 +4,10 @@
 
 const COMPANY_SUFFIXES = [
   /\bsp\.?\s*z\s*o\.?\s*o\.?\b/gi,
+  /\bz\s+ograniczon[ąa]\s+odpowiedzialnością/gi, // pełna forma polska LLC (\b po ą nie działa)
   /\bs\.?\s*a\.?\b/gi,
   /\bspółka\b/gi,
+  /\bprosta\s+spółka\s+akcyjna\b/gi,
   /\bllc\b/gi,
   /\bltd\.?\b/gi,
   /\binc\.?\b/gi,
@@ -20,6 +22,11 @@ const TITLE_NOISE = [
   /\[m\/f(\/d)?\]/gi,
   /\(m\/f(\/d)?\)/gi,
   /\(m\/k\)/gi,
+  /\(h\/f\)/gi,     // francuski wskaźnik płci
+  /\(f\/m(\/d)?\)/gi,
+  /\bm\/k\b/gi,     // bez nawiasów: "Developer m/k"
+  /\bh\/f\b/gi,     // bez nawiasów: "Architecte h/f"
+  /\bm\/f\b/gi,
   /\bremote\b/gi,
   /\bzdalna?\b/gi,
   /\bhybryda\b/gi,

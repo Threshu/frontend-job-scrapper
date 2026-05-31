@@ -6,6 +6,8 @@ export interface JobFilters {
 	source: string;
 	search: string;
 	includeStale: boolean;
+	hideNoise: boolean;
+	vueInTitle: boolean;
 }
 
 export type SortBy = "relevance" | "newest";
@@ -89,6 +91,8 @@ export function useJobs() {
 		source: "",
 		search: "",
 		includeStale: false,
+		hideNoise: true,
+		vueInTitle: false,
 	}));
 	const sortBy = useState<SortBy>("sortBy", () => "relevance");
 	const groups = useState<GroupDto[]>("groups", () => []);
@@ -120,6 +124,8 @@ export function useJobs() {
 				if (filters.value.source) q.source = filters.value.source;
 				if (filters.value.search) q.search = filters.value.search;
 				if (filters.value.includeStale) q.includeStale = "1";
+				if (filters.value.hideNoise) q.hideNoise = "1";
+				if (filters.value.vueInTitle) q.vueInTitle = "1";
 			}
 			const res = await $fetch<{ groups: GroupDto[] }>("/api/groups", {
 				query: q,

@@ -92,6 +92,8 @@ export default defineEventHandler((event) => {
   // excludeStale defaults to true — pokazujemy tylko żywe oferty chyba że
   // ktoś świadomie przełączy "pokaż archiwum".
   const includeStale = q.includeStale === '1' || q.includeStale === 'true'
+  const vueInTitle = q.vueInTitle === '1' || q.vueInTitle === 'true'
+  const hideNoise = q.hideNoise === '1' || q.hideNoise === 'true'
   const limit = Math.min(Number(q.limit) || 200, 500)
 
   const db = useDb()
@@ -112,6 +114,49 @@ export default defineEventHandler((event) => {
         ${sourceFilter ? 'AND l.source = ?' : ''}
     )`)
     if (sourceFilter) params.push(sourceFilter)
+  }
+  if (vueInTitle) {
+    where.push(`EXISTS (
+      SELECT 1 FROM job_listings l
+      WHERE l.group_id = g.id AND l.vue_in_title = 1
+    )`)
+  }
+  if (hideNoise) {
+    // Oferta jest OK jeśli Vue jest w tytule ALBO tytuł nie pasuje do szablonów szumu.
+    // Szablony pokrywają: języki backendowe jako główny tech, role niedev, React/Angular-primary.
+    const noisePatterns = [
+      // Python jako główny język — każdy tytuł z "python" bez Vue w tytule
+      '%python%',
+      // Java (ostrożnie — nie "javascript")
+      '%java developer%', '%java engineer%', '%fullstack java%',
+      // .NET/C# jako główny
+      '%.net developer%', '%.net engineer%', '%.net core%', '%.net full%', '%(.net%', '% .net%',
+      // React jako główny frontend (bez Vue w tytule)
+      '%react developer%', '%react engineer%', '%react native%',
+      // Inne języki backendowe
+      '%golang%', '%kotlin developer%', '%kotlin engineer%', '%c++%', '%ruby%',
+      // Role niedev
+      '%qa engineer%', '%quality engineer%', '%quality assurance%',
+      '%tester manualny%', '%engineer in test%',
+      '%director%', '% manager%', '% analyst%', '% designer%',
+      '%support specialist%', '%support engineer%',
+      '%product owner%', '%cloud consultant%', '%devops%',
+      // Lead/architect role titles (vue_in_title=1 chroni "Lead Vue Developer" itp.)
+      '%lead software engineer%', '%lead full%', '%tech lead%', '%team lead%',
+      '%solution architect%', '%software architect%', '%architecte%',
+      // PHP jako główny (PHP+Vue z Vue w tytule jest chronione przez warunek vue_in_title)
+      '%php developer%', '%php engineer%',
+      // Platformy e-commerce (Shopify/Magento/WP) — nie Vue-frontend
+      '%shopify%', '%magento%', '%wordpress developer%', '%wordpress engineer%',
+      // Ogólne role e-commerce (Technical Lead, Architect itp.)
+      '%ecommerce%',
+    ]
+    const likeClauses = noisePatterns.map(() => `LOWER(g.canonical_title) LIKE ?`).join(' OR ')
+    where.push(`(
+      EXISTS (SELECT 1 FROM job_listings ln WHERE ln.group_id = g.id AND ln.vue_in_title = 1)
+      OR NOT (${likeClauses})
+    )`)
+    params.push(...noisePatterns)
   }
   // Stale filter: exclude groups whose ALL listings are stale.
   // "stale" = last_seen_at older than threshold OR posted_at older than threshold.

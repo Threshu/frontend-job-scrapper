@@ -33,6 +33,16 @@ function apply() { refresh() }
     </label>
 
     <label class="checkbox">
+      <input v-model="filters.hideNoise" type="checkbox" @change="apply">
+      <span>Ukryj szum</span>
+    </label>
+
+    <label class="checkbox">
+      <input v-model="filters.vueInTitle" type="checkbox" @change="apply">
+      <span>Vue w tytule</span>
+    </label>
+
+    <label class="checkbox">
       <input v-model="filters.includeStale" type="checkbox" @change="apply">
       <span>Pokaż archiwum</span>
     </label>

@@ -87,7 +87,16 @@
       "Bash(npx nuxi *)",
       "Bash(node_modules\\\\.bin\\\\nuxt typecheck *)",
       "Bash(npx --yes vue-tsc --noEmit)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(curl -s \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=0\")",
+      "Bash(Read-Content *)",
+      "PowerShell($r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Baseline \\(no noise filter\\):\" $r.groups.Count)",
+      "PowerShell($r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"With hideNoise=1:\" $r.groups.Count)",
+      "PowerShell($r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&vueInTitle=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"With vueInTitle=1:\" $r.groups.Count; $r.groups | Select-Object canonicalTitle,canonicalCompany | Format-Table -AutoSize)",
+      "PowerShell($r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&vueInTitle=1&includeStale=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"vueInTitle + includeStale:\" $r.groups.Count; $r.groups | Select-Object canonicalTitle | Format-Table -AutoSize)",
+      "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
+      "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'python' -or $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
+      "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'ruby' } | Select-Object canonicalTitle)"
     ]
   }
 }
