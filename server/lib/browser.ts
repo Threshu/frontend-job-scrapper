@@ -8,7 +8,7 @@ let _browser: Browser | null = null
 let _context: BrowserContext | null = null
 
 const USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
 
 async function ensureContext(): Promise<BrowserContext> {
   if (_context) return _context
@@ -38,7 +38,12 @@ async function ensureContext(): Promise<BrowserContext> {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
 
     // 2. Fake the chrome runtime object (absent in headless Chromium)
-    ;(window as unknown as Record<string, unknown>).chrome = { runtime: {}, app: { isInstalled: false } }
+    ;(window as unknown as Record<string, unknown>).chrome = {
+      runtime: {},
+      app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false, installState: () => {} },
+      loadTimes: () => ({}),
+      csi: () => ({}),
+    }
 
     // 3. Fake a non-zero plugins list (headless has 0)
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] })
@@ -52,6 +57,37 @@ async function ensureContext(): Promise<BrowserContext> {
       desc.name === 'notifications'
         ? Promise.resolve({ state: 'default' } as unknown as PermissionStatus)
         : origQuery(desc)
+
+    // 6. Hardware concurrency and device memory (headless often returns low/0 values)
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 })
+    Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 })
+
+    // 7. User-Agent Client Hints — must match the User-Agent string
+    Object.defineProperty(navigator, 'userAgentData', {
+      get: () => ({
+        brands: [
+          { brand: 'Chromium', version: '136' },
+          { brand: 'Google Chrome', version: '136' },
+          { brand: 'Not.A/Brand', version: '99' },
+        ],
+        mobile: false,
+        platform: 'Windows',
+        getHighEntropyValues: (hints: string[]) =>
+          Promise.resolve(
+            Object.fromEntries(
+              hints.map((h) => {
+                if (h === 'platform') return [h, 'Windows']
+                if (h === 'platformVersion') return [h, '10.0.0']
+                if (h === 'architecture') return [h, 'x86']
+                if (h === 'bitness') return [h, '64']
+                if (h === 'fullVersionList') return [h, [{ brand: 'Google Chrome', version: '136.0.0.0' }]]
+                if (h === 'uaFullVersion') return [h, '136.0.0.0']
+                return [h, '']
+              }),
+            ),
+          ),
+      }),
+    })
   })
   return _context
 }
@@ -127,11 +163,18 @@ export async function fetchPagesNextDataSequential(
     for (let i = 0; i < urls.length; i++) {
       try {
         await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
-        // Wait up to 25s for __NEXT_DATA__ — Cloudflare challenge can take ~10s to
+        // Wait up to 35s for __NEXT_DATA__ — Cloudflare challenge can take ~10-20s to
         // solve and redirect before the actual page (with __NEXT_DATA__) loads.
-        await page
-          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 25_000 })
-          .catch(() => {})
+        // If waitForFunction rejects (navigation/timeout), wait for the page to settle
+        // so we catch the case where the challenge redirected mid-wait.
+        const challengeResolved = await page
+          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 35_000 })
+          .then(() => true)
+          .catch(() => false)
+        if (!challengeResolved) {
+          // Challenge may have redirected — give the new page a moment to settle
+          await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
+        }
         const { nextData, title } = await page.evaluate(() => ({
           nextData: (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
           title: document.title,

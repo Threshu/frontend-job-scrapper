@@ -156,7 +156,7 @@ export const pracujScraper: JobScraper = {
 
       let dataPages: NextDataResult[]
       try {
-        dataPages = await fetchPagesNextDataSequential(urls, { pageDelayMs: 400 })
+        dataPages = await fetchPagesNextDataSequential(urls, { pageDelayMs: 1500 })
       } catch (e) {
         errors.push(`${path}: ${(e as Error).message}`)
         continue

@@ -96,7 +96,8 @@
       "PowerShell($r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&vueInTitle=1&includeStale=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"vueInTitle + includeStale:\" $r.groups.Count; $r.groups | Select-Object canonicalTitle | Format-Table -AutoSize)",
       "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
       "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'python' -or $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
-      "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'ruby' } | Select-Object canonicalTitle)"
+      "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'ruby' } | Select-Object canonicalTitle)",
+      "Bash(sqlite3 *)"
     ]
   }
 }
