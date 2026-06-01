@@ -36,6 +36,9 @@ export interface ScrapeResult {
   source: string
   jobs: RawJob[]
   errors: string[]
+  // Source IDs of postings detected as closed during this scrape run.
+  // The orchestrator will expire these so they immediately become stale.
+  closedIds?: string[]
 }
 
 export interface JobScraper {

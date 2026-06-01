@@ -63,14 +63,18 @@ function parseSearchCards(html: string): CardRaw[] {
   return cards
 }
 
-async function fetchDetailDescription(jobId: string, signal?: AbortSignal): Promise<string> {
+// Returns null when the posting is closed ("no longer accepting applications").
+async function fetchDetailDescription(jobId: string, signal?: AbortSignal): Promise<string | null> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
   const res = await fetch(url, { headers: HEADERS, signal })
   if (!res.ok) throw new Error(`LI detail ${jobId} → HTTP ${res.status}`)
   const html = await res.text()
   const $ = cheerio.load(html)
-  // The description sits under div.show-more-less-html__markup or
-  // .description__text — both contain the rich-text job description.
+  if (
+    $('.closed-job').length > 0 ||
+    $('[class*="closed-job"]').length > 0 ||
+    /no longer accepting|closed-job/i.test(html)
+  ) return null
   const main = $('.show-more-less-html__markup').text() || $('.description__text').text() || $('section.description').text()
   return main.replace(/\s+/g, ' ').trim()
 }
@@ -105,6 +109,7 @@ export const linkedinScraper: JobScraper = {
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []
     const jobs: RawJob[] = []
+    const closedIds: string[] = []
     const seen = new Set<string>()
     const cards: CardRaw[] = []
 
@@ -133,6 +138,7 @@ export const linkedinScraper: JobScraper = {
     for (const c of cards) {
       try {
         const desc = await fetchDetailDescription(c.id, ctx.signal)
+        if (desc === null) { closedIds.push(c.id); continue }
         jobs.push(buildRawJob(c, desc))
       } catch (e) {
         // 429 rate-limit on detail — save card without description rather than discarding it
@@ -146,6 +152,6 @@ export const linkedinScraper: JobScraper = {
       await sleep(DETAIL_DELAY_MS)
     }
 
-    return { source: this.source, jobs, errors }
+    return { source: this.source, jobs, errors, closedIds }
   },
 }

@@ -138,7 +138,9 @@ export default defineEventHandler((event) => {
       // Role niedev
       '%qa engineer%', '%quality engineer%', '%quality assurance%',
       '%tester manualny%', '%engineer in test%',
-      '%director%', '% manager%', '% analyst%', '% designer%',
+      '%director%', '%directeur%', '%ingénierie%',
+      '%telco%', '%telecom%',
+      '% manager%', '% analyst%', '% designer%',
       '%support specialist%', '%support engineer%',
       '%product owner%', '%cloud consultant%', '%devops%',
       // Lead/architect role titles (vue_in_title=1 chroni "Lead Vue Developer" itp.)

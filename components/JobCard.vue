@@ -1,13 +1,9 @@
 <script setup lang="ts">
 import type { GroupDto } from '~~/server/api/groups/index.get'
-import { STATUSES, STATUS_LABEL, type Status } from '~/composables/useJobs'
+import { STATUS_LABEL, type Status } from '~/composables/useJobs'
 
 const props = defineProps<{ group: GroupDto }>()
-const { setStatus, setNotes } = useJobs()
-
-const expanded = ref(false)
-const notesDraft = ref(props.group.notes)
-const savingNotes = ref(false)
+const { setStatus } = useJobs()
 
 const SOURCE_LABEL: Record<string, string> = {
   justjoin: 'JJIT',
@@ -31,17 +27,6 @@ function fmtSalary(g: GroupDto) {
   if (s.max) return `do ${s.max.toLocaleString('pl-PL')} ${cur}`
   if (s.min) return `od ${s.min.toLocaleString('pl-PL')} ${cur}`
   return null
-}
-
-function plainText(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 function highlightVueReact(skill: string): 'vue' | 'react' | 'angular' | 'svelte' | null {
@@ -85,8 +70,6 @@ const allSkills = computed(() => {
   return Array.from(set.values())
 })
 
-const description = computed(() => primaryListing.value ? plainText(primaryListing.value.description) : '')
-
 const STATUS_COLOR: Record<string, string> = {
   new:        'badge-new',
   interested: 'badge-interested',
@@ -94,12 +77,6 @@ const STATUS_COLOR: Record<string, string> = {
   replied:    'badge-replied',
   rejected:   'badge-rejected',
   hidden:     'badge-hidden',
-}
-
-async function saveNotes() {
-  savingNotes.value = true
-  try { await setNotes(props.group.id, notesDraft.value) }
-  finally { savingNotes.value = false }
 }
 
 async function change(s: Status) {
@@ -234,7 +211,7 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
           target="_blank"
           rel="noopener"
           class="source-pill"
-        >{{ SOURCE_LABEL[l.source] ?? l.source }}</a>
+        >{{ SOURCE_LABEL[l.source] ?? l.source }} ↗</a>
       </div>
 
       <div v-if="allSkills.length" class="skills">
@@ -246,34 +223,18 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
         >{{ s }}</span>
       </div>
 
-      <div v-if="expanded" class="expanded">
-        <p class="description">{{ description.slice(0, 1500) }}<span v-if="description.length > 1500">…</span></p>
-
-        <div class="actions">
-          <span class="actions-label">Zmień status:</span>
-          <button
-            v-for="s in STATUSES"
-            :key="s"
-            class="status-btn"
-            :class="{ active: group.status === s }"
-            @click="change(s as Status)"
-          >{{ STATUS_LABEL[s as Status] }}</button>
-        </div>
-
-        <div class="notes">
-          <label>
-            <span>Notatki</span>
-            <textarea v-model="notesDraft" rows="3" placeholder="Twoje notatki o ofercie..." />
-          </label>
-          <button class="btn-save" :disabled="savingNotes || notesDraft === group.notes" @click="saveNotes">
-            {{ savingNotes ? 'Zapisuję...' : 'Zapisz' }}
-          </button>
-        </div>
+      <div class="card-actions">
+        <button
+          class="action-btn action-applied"
+          :class="{ active: group.status === 'applied' }"
+          @click="change('applied')"
+        >✓ Zaaplikowano</button>
+        <button
+          class="action-btn action-rejected"
+          :class="{ active: group.status === 'rejected' }"
+          @click="change('rejected')"
+        >✗ Odrzuć</button>
       </div>
-
-      <button class="expand-toggle" @click="expanded = !expanded">
-        {{ expanded ? '↑ Zwiń' : '↓ Pokaż szczegóły' }}
-      </button>
     </div>
 
   </article>
@@ -358,19 +319,26 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
 .sources {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.3rem;
-  margin-top: 0.5rem;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
 }
 .source-pill {
-  font-size: 0.75rem;
-  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.45rem 0.9rem;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 0.3rem;
+  border-radius: 0.4rem;
   color: var(--fg);
   text-decoration: none;
+  flex: 1;
+  text-align: center;
+  min-height: 2.2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.source-pill:hover { background: var(--accent); color: white; }
+.source-pill:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
 .skills {
   margin-top: 0.6rem;
@@ -415,74 +383,38 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
 .badge-rejected   { background: rgba(239, 68, 68, 0.2);   color: #fca5a5; }
 .badge-hidden     { background: rgba(100, 116, 139, 0.2); color: #94a3b8; }
 
-.expanded {
+.card-actions {
+  display: flex;
+  gap: 0.5rem;
   margin-top: 0.8rem;
-  padding-top: 0.8rem;
+  padding-top: 0.7rem;
   border-top: 1px solid var(--border);
 }
-.description {
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: var(--fg);
-  max-height: 14rem;
-  overflow: auto;
-  white-space: pre-wrap;
-}
 
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-  align-items: center;
-  margin-top: 0.8rem;
-}
-.actions-label { font-size: 0.85rem; color: var(--muted); margin-right: 0.4rem; }
-.status-btn {
-  font-size: 0.8rem;
-  padding: 0.3rem 0.6rem;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 0.3rem;
-  cursor: pointer;
-  color: var(--fg);
-}
-.status-btn:hover { border-color: var(--accent); }
-.status-btn.active { background: var(--accent); color: white; border-color: var(--accent); }
-
-.notes { margin-top: 0.8rem; }
-.notes label { display: block; }
-.notes span { font-size: 0.85rem; color: var(--muted); display: block; margin-bottom: 0.3rem; }
-.notes textarea {
-  width: 100%;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.3rem;
-  background: var(--bg);
-  color: var(--fg);
-  font-family: inherit;
-  font-size: 0.9rem;
-  resize: vertical;
-}
-.btn-save {
-  margin-top: 0.4rem;
-  padding: 0.4rem 0.9rem;
-  background: var(--accent);
-  color: white;
-  border: 0;
-  border-radius: 0.3rem;
-  cursor: pointer;
+.action-btn {
+  flex: 1;
+  padding: 0.4rem 0.6rem;
   font-size: 0.85rem;
-}
-.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.expand-toggle {
-  margin-top: 0.6rem;
-  background: transparent;
-  border: 0;
-  color: var(--muted);
-  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 0.4rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
   cursor: pointer;
-  padding: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.expand-toggle:hover { color: var(--accent); }
+
+.action-applied:hover,
+.action-applied.active {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: #4ade80;
+  color: #4ade80;
+}
+
+.action-rejected:hover,
+.action-rejected.active {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #fca5a5;
+  color: #fca5a5;
+}
 </style>

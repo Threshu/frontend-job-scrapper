@@ -198,6 +198,15 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
   }
 }
 
+export function expireListings(source: string, sourceIds: string[], db: Database = useDb()): void {
+  if (!sourceIds.length) return
+  const old = new Date(Date.now() - 30 * 86_400_000).toISOString()
+  const placeholders = sourceIds.map(() => '?').join(',')
+  db.prepare(
+    `UPDATE job_listings SET last_seen_at = ? WHERE source = ? AND source_id IN (${placeholders})`,
+  ).run(old, source, ...sourceIds)
+}
+
 export function recordScrapeRun(
   source: string,
   status: 'running' | 'ok' | 'error',

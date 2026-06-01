@@ -242,7 +242,7 @@
 						<span class="sp-icon">{{ c.hasWarning ? "⚠" : "✓" }}</span>
 						<span class="sp-name">{{ c.displayName }}</span>
 						<span class="sp-stat"
-							>{{ c.fetched }} ofert · {{ c.newListings }} nowych</span
+							>{{ c.fetched }} pobranych · {{ c.newGroups }} na liście</span
 						>
 					</div>
 					<div v-if="c.shownErrors.length" class="sp-errs">
@@ -382,11 +382,15 @@
 
 	/* ── Scrape progress panel ── */
 	.scrape-progress {
+		position: fixed;
+		left: 1rem;
+		top: 1.5rem;
+		width: 280px;
+		z-index: 100;
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: 0.5rem;
 		padding: 0.9rem 1rem;
-		margin-bottom: 1rem;
 	}
 	.sp-head {
 		display: flex;

@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import { useDb } from '../db'
-import { recordScrapeRun, upsertListing } from '../db/repository'
+import { expireListings, recordScrapeRun, upsertListing } from '../db/repository'
 import { SCRAPERS } from '../scrapers'
 import type { JobScraper, ScrapeContext } from '../scrapers/types'
 import { closeBrowser, isBrowserOpen } from './browser'
@@ -68,6 +68,7 @@ async function runOne(
       }
     })
     insert(out.jobs)
+    if (out.closedIds?.length) expireListings(scraper.source, out.closedIds, db)
     recordScrapeRun(scraper.source, 'ok', result.fetched, result.newListings, result.errors.length ? result.errors.join('\n') : null, db)
   } catch (e) {
     const msg = (e as Error).message
