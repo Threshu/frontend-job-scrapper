@@ -97,7 +97,28 @@
       "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
       "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'python' -or $_.canonicalTitle -match 'Python' } | Select-Object canonicalTitle)",
       "PowerShell(Start-Sleep -Seconds 2; $r = Invoke-WebRequest \"http://localhost:3737/api/groups?status=new&hasVue=1&hideNoise=1\" -UseBasicParsing | ConvertFrom-Json; Write-Host \"Count:\" $r.groups.Count; $r.groups | Where-Object { $_.canonicalTitle -match 'ruby' } | Select-Object canonicalTitle)",
-      "Bash(sqlite3 *)"
+      "Bash(sqlite3 *)",
+      "WebFetch(domain:pljooble.org)",
+      "WebFetch(domain:pl.jooble.org)",
+      "WebFetch(domain:jooble.org)",
+      "WebFetch(domain:developer.jooble.org)",
+      "Bash(curl -s -A \"Mozilla/5.0 \\(Windows NT 10.0; Win64; x64\\) AppleWebKit/537.36 \\(KHTML, like Gecko\\) Chrome/124.0.0.0 Safari/537.36\" \"https://pl.jooble.org/SearchResult?rgns=Polska&ukw=vue+js&p=1\")",
+      "Bash(npx nuxt *)",
+      "Bash(curl *)",
+      "WebFetch(domain:czyjesteldorado.pl)",
+      "Bash(grep -oP 'fetch\\\\\\([^\\)]+\\\\\\)|api[^\"]*\"|/api/[^\"\\\\\\\\s]+')",
+      "Bash(grep -oP '\"https://[^\"]{10,80}\"')",
+      "Bash(grep -oP '\"[^\"]{5,80}eldorado[^\"]{0,80}\"')",
+      "Bash(grep -oP '\"\\(/[a-z][a-z0-9_/-]{2,40}\\)\"')",
+      "Bash(grep -E '^/[a-z][a-z0-9/-]{4,40}$')",
+      "Bash(grep -E '^/[a-z][a-z0-9/-]{5,50}$')",
+      "Bash(grep -oP '\"title\":\"[^\"]{5,100}\"')",
+      "Bash(grep -oP '\"children\":\"[^\"]{5,100}\"')",
+      "Bash(grep -oP '\"offerTitle\":\"[^\"]{5,80}\"')",
+      "Bash(grep -oP '\"salary[^\"]*\":\"[^\"]{3,50}\"')",
+      "Bash(grep -oP 'push\\\\\\(\\\\[1,\"[^\"]{200,}\"')",
+      "Bash(grep -oP '\"href\":\"/praca/[^\"]{5,80}\"')",
+      "Bash(awk '{print $2}')"
     ]
   }
 }

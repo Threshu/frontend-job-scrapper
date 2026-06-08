@@ -10,6 +10,7 @@ import { theProtocolScraper } from './theprotocol'
 import { indeedScraper } from './indeed'
 import { remotiveScraper } from './remotive'
 import { crosswebScraper } from './crossweb'
+
 // praca.pl keyword search does not distinguish Vue.js from the French word "vue"
 // — it returns warehouse workers, CNC operators, and school directors instead of
 // IT jobs. Disabled until a reliable IT-category URL is found.
@@ -25,19 +26,21 @@ import { crosswebScraper } from './crossweb'
 // Registry of available scrapers. Add a new portal by importing its scraper
 // here. The orchestrator iterates this list and isolates failures per source.
 //
-// Tier 1 (plain JSON APIs):    justjoin, nofluffjobs, rocketjobs, remoteok
-// Tier 2 (HTML w/o browser):   bulldogjob, linkedin (guest search)
+// Tier 1 (plain JSON APIs):    justjoin, nofluffjobs, rocketjobs, remoteok, remotive
+// Tier 2 (HTML w/o browser):   bulldogjob, linkedin, crossweb
 // Tier 3 (Playwright):         pracuj, theprotocol, indeed
+// Jooble disabled: API returns tracking URLs that redirect to jobleads.com / appcast.io —
+// final destination is only visible after a redirect, so URL-based filtering is not feasible.
 export const SCRAPERS: JobScraper[] = [
   justjoinScraper,
   nofluffjobsScraper,
   rocketjobsScraper,
   remoteokScraper,
+  remotiveScraper,
   bulldogjobScraper,
   linkedinScraper,
+  crosswebScraper,
   pracujScraper,
   theProtocolScraper,
   indeedScraper,
-  remotiveScraper,
-  crosswebScraper,
 ]

@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -sk *)",
+      "Bash(curl -s *)",
+      "Bash(curl -sv *)",
+      "Bash(curl -v *)",
+      "Bash(npx nuxt typecheck)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
