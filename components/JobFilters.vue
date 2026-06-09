@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { STATUSES, STATUS_LABEL, SORT_OPTIONS, type Status } from '~/composables/useJobs'
+import { STATUSES, STATUS_LABEL, SORT_OPTIONS, VUE_RELEVANCE_OPTIONS, type Status } from '~/composables/useJobs'
 
 interface SourceMeta { source: string; displayName: string }
 
@@ -30,6 +30,13 @@ function apply() { refresh() }
     <label class="checkbox">
       <input v-model="filters.hasVue" type="checkbox" @change="apply">
       <span>Tylko z Vue</span>
+    </label>
+
+    <label class="field">
+      <span>Vue w roli</span>
+      <select v-model="filters.vueRelevance" @change="apply">
+        <option v-for="o in VUE_RELEVANCE_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
+      </select>
     </label>
 
     <label class="checkbox">

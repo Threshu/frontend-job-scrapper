@@ -1,4 +1,6 @@
 import { chromium, type Browser, type BrowserContext } from 'playwright'
+import { existsSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 
 // Shared Chromium instance for scrapers that can't use plain fetch (Cloudflare,
 // JS-rendered SPAs). The browser starts lazily on first use and is closed
@@ -9,6 +11,12 @@ let _context: BrowserContext | null = null
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36'
+
+// Persisted storage state — once Cloudflare clears the challenge, the resulting
+// cookie is valid for hours. Saving it between runs lets the next run skip the
+// 30-second JS challenge entirely, which is what was making Pracuj hang on
+// "Cierpliwości…" every time.
+const STORAGE_STATE_PATH = resolve(process.cwd(), 'data/browser-state.json')
 
 async function ensureContext(): Promise<BrowserContext> {
   if (_context) return _context
@@ -23,12 +31,16 @@ async function ensureContext(): Promise<BrowserContext> {
       ],
     })
   }
+  const stateDir = dirname(STORAGE_STATE_PATH)
+  if (!existsSync(stateDir)) mkdirSync(stateDir, { recursive: true })
+  const storageState = existsSync(STORAGE_STATE_PATH) ? STORAGE_STATE_PATH : undefined
   _context = await _browser.newContext({
     userAgent: USER_AGENT,
     locale: 'pl-PL',
     timezoneId: 'Europe/Warsaw',
     viewport: { width: 1280, height: 800 },
     extraHTTPHeaders: { 'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7' },
+    storageState,
   })
   // Anti-bot patches applied to every page in this context.
   // These make headless Chromium look like a normal Chrome install to
@@ -154,26 +166,32 @@ export interface NextDataResult {
 // so callers can log what the page actually showed (challenge page vs real content).
 export async function fetchPagesNextDataSequential(
   urls: string[],
-  opts: { pageDelayMs?: number } = {},
+  opts: { pageDelayMs?: number; maxChallengeWaitMs?: number } = {},
 ): Promise<NextDataResult[]> {
   const context = await ensureContext()
   const page = await context.newPage()
   const results: NextDataResult[] = []
+  const maxChallengeWait = opts.maxChallengeWaitMs ?? 60_000
   try {
     for (let i = 0; i < urls.length; i++) {
       try {
         await page.goto(urls[i], { waitUntil: 'domcontentloaded', timeout: 30_000 })
-        // Wait up to 35s for __NEXT_DATA__ — Cloudflare challenge can take ~10-20s to
-        // solve and redirect before the actual page (with __NEXT_DATA__) loads.
-        // If waitForFunction rejects (navigation/timeout), wait for the page to settle
-        // so we catch the case where the challenge redirected mid-wait.
-        const challengeResolved = await page
-          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 35_000 })
+        // Wait for __NEXT_DATA__. Pracuj's Cloudflare JS challenge can need up
+        // to ~45s in the worst case. We try once with the requested timeout; if
+        // we're still on a challenge page ("Cierpliwości..." / "Just a moment..."),
+        // we wait an extra round before giving up.
+        let challengeResolved = await page
+          .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: maxChallengeWait })
           .then(() => true)
           .catch(() => false)
         if (!challengeResolved) {
-          // Challenge may have redirected — give the new page a moment to settle
-          await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {})
+          // One more retry — sometimes the challenge auto-redirects but our
+          // wait raced the navigation.
+          await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
+          challengeResolved = await page
+            .waitForFunction(() => !!(window as unknown as Record<string, unknown>).__NEXT_DATA__, { timeout: 15_000 })
+            .then(() => true)
+            .catch(() => false)
         }
         const { nextData, title } = await page.evaluate(() => ({
           nextData: (window as unknown as Record<string, unknown>).__NEXT_DATA__ ?? null,
@@ -194,6 +212,10 @@ export async function fetchPagesNextDataSequential(
 }
 
 export async function closeBrowser(): Promise<void> {
+  try {
+    // Save cookies/localStorage so the next run can skip the Cloudflare challenge.
+    if (_context) await _context.storageState({ path: STORAGE_STATE_PATH }).catch(() => {})
+  } catch {}
   try { await _context?.close() } catch {}
   try { await _browser?.close() } catch {}
   _context = null

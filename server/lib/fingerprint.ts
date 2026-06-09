@@ -41,7 +41,10 @@ function squashWhitespace(s: string): string {
 export function normalizeCompany(raw: string): string {
   let s = raw.toLowerCase()
   for (const re of COMPANY_SUFFIXES) s = s.replace(re, ' ')
-  s = s.replace(/[.,()/\\&]+/g, ' ')
+  // Strip pipe too — it's the fingerprint separator, so a company name
+  // containing "|" (e.g. "Careers In Travel | Destination Planners") would
+  // otherwise produce ambiguous 3-piece fingerprints.
+  s = s.replace(/[.,()/\\&|]+/g, ' ')
   return squashWhitespace(s)
 }
 
@@ -56,6 +59,45 @@ export function normalizeTitle(raw: string): string {
 
 export function fingerprintFor(company: string, title: string): string {
   return `${normalizeCompany(company)}|${normalizeTitle(title)}`
+}
+
+// Tokens that look meaningful but are too generic to identify a company on their
+// own. If the first token of the normalized name is one of these (and there's a
+// more distinctive token later), we skip past it when picking the stem.
+const QUALIFIER_STOPWORDS = new Set([
+  'tech', 'soft', 'data', 'cloud', 'digital', 'global', 'group', 'labs', 'lab',
+  'media', 'inter', 'world', 'the', 'and', 'pro', 'plus', 'one', 'first', 'next',
+  'house', 'agency', 'studio', 'works', 'company', 'corp',
+])
+
+// "Luxoft", "Luxoft Poland" and "Luxoft DXC" all share a distinctive root token
+// "luxoft". We pick the first sufficiently long, non-stopword token as the stem;
+// callers index groups by stem and use companiesCompatible() to verify the rest.
+export function companyStem(normalizedCompany: string): string {
+  const tokens = normalizedCompany.split(/\s+/).filter(Boolean)
+  for (const t of tokens) {
+    if (t.length >= 4 && !QUALIFIER_STOPWORDS.has(t)) return t
+  }
+  return tokens[0] ?? ''
+}
+
+// True if two normalized company strings likely describe the same employer.
+// Used as the second gate after a shared canonical_stem: catches "luxoft" vs
+// "luxoft poland" (subset) and "luxoft poland" vs "luxoft dxc" (shared root).
+export function companiesCompatible(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  const aTokens = new Set(a.split(/\s+/).filter(Boolean))
+  const bTokens = new Set(b.split(/\s+/).filter(Boolean))
+  const [small, large] = aTokens.size <= bTokens.size ? [aTokens, bTokens] : [bTokens, aTokens]
+  let subset = true
+  for (const t of small) if (!large.has(t)) { subset = false; break }
+  if (subset) return true
+  // Both sides have unique tokens — accept if they share at least one
+  // distinctive (length ≥ 4) root token.
+  let sharedSignificant = 0
+  for (const t of small) if (large.has(t) && t.length >= 4) sharedSignificant++
+  return sharedSignificant >= 1
 }
 
 // Levenshtein distance — small implementation, used only on short title strings.

@@ -23,7 +23,9 @@ const HEADERS: HeadersInit = {
 
 const SEARCH_QUERIES: Array<{ label: string; criteria: { requirement?: string[]; category?: string[] } }> = [
   { label: 'vue',      criteria: { requirement: ['vue.js'] } },
+  { label: 'nuxt',     criteria: { requirement: ['nuxt.js'] } },
   { label: 'frontend', criteria: { category: ['frontend'] } },
+  { label: 'fullstack', criteria: { category: ['fullstack'] } },
 ]
 
 interface NfjPosting {

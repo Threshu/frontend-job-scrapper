@@ -19,9 +19,11 @@ import { fetchPagesNextDataSequential, type NextDataResult } from '../lib/browse
 // same format as the confirmed-working vue.js path.
 const SEARCH_PATHS = [
   '/praca/vue.js;kw',
+  '/praca/nuxt.js;kw',
   '/praca/react.js;kw',
   '/praca/typescript;kw',
   '/praca/frontend-developer;kw',
+  '/praca/javascript;kw',
 ]
 const MAX_PAGES_PER_SEARCH = 5
 
@@ -156,7 +158,11 @@ export const pracujScraper: JobScraper = {
 
       let dataPages: NextDataResult[]
       try {
-        dataPages = await fetchPagesNextDataSequential(urls, { pageDelayMs: 1500 })
+        dataPages = await fetchPagesNextDataSequential(urls, {
+          pageDelayMs: 1500,
+          // Cloudflare challenge needs more breathing room on Pracuj.
+          maxChallengeWaitMs: 60_000,
+        })
       } catch (e) {
         errors.push(`${path}: ${(e as Error).message}`)
         continue

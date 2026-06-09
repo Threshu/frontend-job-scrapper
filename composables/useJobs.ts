@@ -8,7 +8,18 @@ export interface JobFilters {
 	includeStale: boolean;
 	hideNoise: boolean;
 	vueInTitle: boolean;
+	// 'core' (default) = primary+required, 'all' = also include "Vue mile widziane",
+	// 'primary' = only Vue-in-title, 'mention' = only nice-to-have, '' = any/disabled.
+	vueRelevance: 'core' | 'all' | 'primary' | 'required' | 'mention';
 }
+
+export const VUE_RELEVANCE_OPTIONS: { value: JobFilters['vueRelevance']; label: string }[] = [
+	{ value: 'core', label: 'Vue jako stack (domyślne)' },
+	{ value: 'primary', label: 'Tylko Vue w tytule' },
+	{ value: 'required', label: 'Tylko Vue wymagane' },
+	{ value: 'mention', label: 'Tylko Vue mile widziane' },
+	{ value: 'all', label: 'Wszystko z Vue (z szumem)' },
+];
 
 export type SortBy = "relevance" | "newest";
 
@@ -35,6 +46,8 @@ function relevanceScore(g: GroupDto): number {
 
 	// Vue w tytule = rola stricte dla Vue devów — najsilniejszy sygnał
 	if (g.vueInTitle) score += 50;
+	else if (g.vueRelevance === 'required') score += 25;
+	else if (g.vueRelevance === 'mention') score += 5;
 	else if (g.hasVue) score += 15;
 
 	// Remote = szersza pula kandydatów, ale też więcej możliwości
@@ -93,6 +106,7 @@ export function useJobs() {
 		includeStale: false,
 		hideNoise: true,
 		vueInTitle: false,
+		vueRelevance: "core",
 	}));
 	const sortBy = useState<SortBy>("sortBy", () => "relevance");
 	const groups = useState<GroupDto[]>("groups", () => []);
@@ -126,6 +140,9 @@ export function useJobs() {
 				if (filters.value.includeStale) q.includeStale = "1";
 				if (filters.value.hideNoise) q.hideNoise = "1";
 				if (filters.value.vueInTitle) q.vueInTitle = "1";
+				if (filters.value.vueRelevance && filters.value.vueRelevance !== "all") {
+					q.vueRelevance = filters.value.vueRelevance;
+				}
 			}
 			const res = await $fetch<{ groups: GroupDto[] }>("/api/groups", {
 				query: q,

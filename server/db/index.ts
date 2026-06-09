@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { mkdirSync, existsSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { SCHEMA_SQL } from './schema'
+import { runMigrations } from './migrations'
 
 let _db: Database.Database | null = null
 
@@ -18,6 +19,7 @@ export function useDb(): Database.Database {
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 10000')
   db.exec(SCHEMA_SQL)
+  runMigrations(db)
 
   _db = db
   return db

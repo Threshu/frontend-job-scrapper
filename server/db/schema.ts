@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS job_listings (
   has_angular     INTEGER NOT NULL DEFAULT 0,
   has_svelte      INTEGER NOT NULL DEFAULT 0,
   vue_in_title    INTEGER NOT NULL DEFAULT 0,
+  -- Vue's role in the posting: 'primary' (Vue in title), 'required' (must-have stack),
+  -- 'mention' (nice-to-have only) or 'none'. Used to filter out Senior-Python-with-Vue-bonus noise.
+  vue_relevance   TEXT NOT NULL DEFAULT 'none',
   posted_at       TEXT,
   first_seen_at   TEXT NOT NULL,
   last_seen_at    TEXT NOT NULL,
@@ -30,14 +33,20 @@ CREATE TABLE IF NOT EXISTS job_listings (
   UNIQUE(source, source_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_listings_group      ON job_listings(group_id);
-CREATE INDEX IF NOT EXISTS idx_listings_source     ON job_listings(source);
-CREATE INDEX IF NOT EXISTS idx_listings_has_vue    ON job_listings(has_vue);
-CREATE INDEX IF NOT EXISTS idx_listings_first_seen ON job_listings(first_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_group       ON job_listings(group_id);
+CREATE INDEX IF NOT EXISTS idx_listings_source      ON job_listings(source);
+CREATE INDEX IF NOT EXISTS idx_listings_has_vue     ON job_listings(has_vue);
+CREATE INDEX IF NOT EXISTS idx_listings_first_seen  ON job_listings(first_seen_at DESC);
+-- idx_listings_vue_releva and idx_groups_stem are created in migrations.ts after
+-- the ALTER TABLE that adds those columns on pre-existing databases.
 
 CREATE TABLE IF NOT EXISTS job_groups (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   fingerprint         TEXT NOT NULL,
+  -- Single distinctive token derived from the normalized company name.
+  -- Drives fuzzy company matching ("Luxoft" / "Luxoft Poland" / "Luxoft DXC"
+  -- all share canonical_stem = "luxoft").
+  canonical_stem      TEXT NOT NULL DEFAULT '',
   canonical_title     TEXT NOT NULL,
   canonical_company   TEXT NOT NULL,
   status              TEXT NOT NULL DEFAULT 'new',

@@ -6,7 +6,7 @@ import { fetchPageHtml } from '../lib/browser'
 // rendered HTML, but their bot defense still surfaces a CAPTCHA sometimes —
 // the scraper degrades gracefully: failures land in `errors`, partial
 // listings still flow through.
-const KEYWORDS = ['vue', 'frontend developer', 'javascript']
+const KEYWORDS = ['vue', 'nuxt', 'frontend developer', 'javascript']
 const PAGES_PER_KW = 3 // pages of 10 results each
 
 interface Card { jobKey: string; title: string; company: string; location?: string; salary?: string; postedDays?: string }

@@ -1,8 +1,15 @@
 import type { Database } from 'better-sqlite3'
 import { useDb } from './index'
 import type { RawJob } from '../scrapers/types'
-import { detectFrameworks } from '../lib/vueDetector'
-import { fingerprintFor, normalizeCompany, normalizeTitle, levenshtein } from '../lib/fingerprint'
+import { classifyVueRelevance, detectFrameworks } from '../lib/vueDetector'
+import {
+  companiesCompatible,
+  companyStem,
+  fingerprintFor,
+  levenshtein,
+  normalizeCompany,
+  normalizeTitle,
+} from '../lib/fingerprint'
 
 export interface ListingRow {
   id: number
@@ -26,6 +33,7 @@ export interface ListingRow {
   has_angular: number
   has_svelte: number
   vue_in_title: number
+  vue_relevance: string
   posted_at: string | null
   first_seen_at: string
   last_seen_at: string
@@ -35,6 +43,7 @@ export interface ListingRow {
 export interface GroupRow {
   id: number
   fingerprint: string
+  canonical_stem: string
   canonical_title: string
   canonical_company: string
   status: string
@@ -69,21 +78,27 @@ function findFuzzyGroup(
   company: string,
   title: string,
 ): GroupRow | undefined {
-  // Candidate groups share the same normalized company; we then verify title proximity.
   const normCompany = normalizeCompany(company)
   const normTitle = normalizeTitle(title)
+  const stem = companyStem(normCompany)
+  if (!stem) return undefined
+
+  // Candidate groups share the same company stem — covers
+  // "Luxoft" / "Luxoft Poland" / "Luxoft DXC". We then verify the rest
+  // (companiesCompatible + title fuzzy).
   const candidates = db
     .prepare<[string, string], GroupRow>(
       `SELECT * FROM job_groups
-       WHERE fingerprint LIKE ? || '|%'
+       WHERE canonical_stem = ?
          AND created_at >= datetime('now', ?)
          AND manually_split = 0`,
     )
-    .all(normCompany, `-${FUZZY_RECENT_DAYS} days`)
+    .all(stem, `-${FUZZY_RECENT_DAYS} days`)
 
   for (const c of candidates) {
-    const candidateTitle = c.fingerprint.split('|')[1] ?? ''
-    if (levenshtein(candidateTitle, normTitle) <= FUZZY_TITLE_MAX_DISTANCE) {
+    const [candCompany, candTitle] = c.fingerprint.split('|')
+    if (!companiesCompatible(normCompany, candCompany ?? '')) continue
+    if (levenshtein(candTitle ?? '', normTitle) <= FUZZY_TITLE_MAX_DISTANCE) {
       return c
     }
   }
@@ -93,16 +108,18 @@ function findFuzzyGroup(
 function createGroup(db: Database, company: string, title: string): GroupRow {
   const now = new Date().toISOString()
   const fingerprint = fingerprintFor(company, title)
+  const stem = companyStem(normalizeCompany(company))
   const info = db
     .prepare(
       `INSERT INTO job_groups
-        (fingerprint, canonical_title, canonical_company, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?)`,
+        (fingerprint, canonical_stem, canonical_title, canonical_company, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
-    .run(fingerprint, title, company, now, now)
+    .run(fingerprint, stem, title, company, now, now)
   return {
     id: Number(info.lastInsertRowid),
     fingerprint,
+    canonical_stem: stem,
     canonical_title: title,
     canonical_company: company,
     status: 'new',
@@ -124,6 +141,9 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
     description: job.description,
     skills: job.skills,
   })
+  const relevance = flags.hasVue
+    ? classifyVueRelevance(job.title, job.description, job.skills)
+    : 'none'
 
   const existing = db
     .prepare<[string, string], ListingRow>(
@@ -159,9 +179,9 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
         source, source_id, url, title, company, location, remote,
         salary_min, salary_max, currency, salary_period, contract_type, experience,
         description, skills_json,
-        has_vue, has_react, has_angular, has_svelte, vue_in_title,
+        has_vue, has_react, has_angular, has_svelte, vue_in_title, vue_relevance,
         posted_at, first_seen_at, last_seen_at, group_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       job.source,
@@ -184,6 +204,7 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
       flags.hasAngular ? 1 : 0,
       flags.hasSvelte ? 1 : 0,
       flags.vueInTitle ? 1 : 0,
+      relevance,
       job.postedAt ?? null,
       now,
       now,

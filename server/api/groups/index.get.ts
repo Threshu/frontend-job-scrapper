@@ -15,6 +15,9 @@ export interface GroupDto {
   hasAngular: boolean
   hasSvelte: boolean
   vueInTitle: boolean
+  // Strongest Vue-relevance signal across the group's listings.
+  // primary > required > mention > none.
+  vueRelevance: 'primary' | 'required' | 'mention' | 'none'
   isStale: boolean                       // true iff EVERY listing is stale
   bestSalary: { min: number | null; max: number | null; currency: string | null } | null
   listings: Array<{
@@ -36,6 +39,7 @@ export interface GroupDto {
     skills: string[]
     hasVue: boolean
     hasReact: boolean
+    vueRelevance: 'primary' | 'required' | 'mention' | 'none'
     postedAt: string | null
     firstSeenAt: string
     lastSeenAt: string
@@ -71,6 +75,7 @@ function mapListing(r: ListingRowWithStale): GroupDto['listings'][number] {
     skills: JSON.parse(r.skills_json) as string[],
     hasVue: !!r.has_vue,
     hasReact: !!r.has_react,
+    vueRelevance: (r.vue_relevance as GroupDto['listings'][number]['vueRelevance']) ?? 'none',
     postedAt: r.posted_at,
     firstSeenAt: r.first_seen_at,
     lastSeenAt: r.last_seen_at,
@@ -94,6 +99,15 @@ export default defineEventHandler((event) => {
   const includeStale = q.includeStale === '1' || q.includeStale === 'true'
   const vueInTitle = q.vueInTitle === '1' || q.vueInTitle === 'true'
   const hideNoise = q.hideNoise === '1' || q.hideNoise === 'true'
+  // vueRelevance: 'core' = primary+required (default for active tab),
+  // 'all' = include 'mention' too. The accepted set goes to the EXISTS check.
+  const vueRelevance = typeof q.vueRelevance === 'string' ? q.vueRelevance : ''
+  const relevanceAllowed: string[] | null =
+    vueRelevance === 'core' ? ['primary', 'required']
+    : vueRelevance === 'primary' ? ['primary']
+    : vueRelevance === 'required' ? ['required']
+    : vueRelevance === 'mention' ? ['mention']
+    : null
   const limit = Math.min(Number(q.limit) || 200, 500)
 
   const db = useDb()
@@ -120,6 +134,14 @@ export default defineEventHandler((event) => {
       SELECT 1 FROM job_listings l
       WHERE l.group_id = g.id AND l.vue_in_title = 1
     )`)
+  }
+  if (relevanceAllowed) {
+    const placeholders = relevanceAllowed.map(() => '?').join(',')
+    where.push(`EXISTS (
+      SELECT 1 FROM job_listings l
+      WHERE l.group_id = g.id AND l.vue_relevance IN (${placeholders})
+    )`)
+    params.push(...relevanceAllowed)
   }
   if (hideNoise) {
     // Oferta jest OK jeśli Vue jest w tytule ALBO tytuł nie pasuje do szablonów szumu.
@@ -219,6 +241,14 @@ export default defineEventHandler((event) => {
     }
     const mappedListings = ls.map(mapListing)
     const groupStale = mappedListings.length > 0 && mappedListings.every((l) => l.isStale)
+    // Strongest signal across listings: primary > required > mention > none
+    const RELEVANCE_RANK = { primary: 3, required: 2, mention: 1, none: 0 } as const
+    type RelKey = keyof typeof RELEVANCE_RANK
+    let strongest: RelKey = 'none'
+    for (const l of mappedListings) {
+      const r = (l.vueRelevance as RelKey) ?? 'none'
+      if (RELEVANCE_RANK[r] > RELEVANCE_RANK[strongest]) strongest = r
+    }
     return {
       id: g.id,
       canonicalTitle: g.canonical_title,
@@ -233,6 +263,7 @@ export default defineEventHandler((event) => {
       hasAngular: ls.some((l) => l.has_angular),
       hasSvelte: ls.some((l) => l.has_svelte),
       vueInTitle: ls.some((l) => l.vue_in_title),
+      vueRelevance: strongest,
       isStale: groupStale,
       bestSalary,
       listings: mappedListings,

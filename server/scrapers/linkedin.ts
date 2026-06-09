@@ -11,14 +11,25 @@ import type {
 // Detail comes from /jobs-guest/jobs/api/jobPosting/{id}, also HTML.
 //
 // We submit a few queries to widen the net (Vue explicit + frontend/JS broad).
-const KEYWORDS = ['vue', 'frontend developer']
+const KEYWORDS = ['vue', 'nuxt', 'frontend developer', 'vue.js developer']
 const LOCATION = 'Poland'
 const MAX_CARDS_PER_KEYWORD = 300    // LinkedIn caps search results at ~300–750 per query
 
-const HEADERS: HeadersInit = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  Accept: 'text/html,*/*',
-  'Accept-Language': 'en-US,en;q=0.9,pl;q=0.8',
+// A small UA pool — LinkedIn silently returns empty pages when one User-Agent
+// gets soft-throttled. Rotating per keyword keeps each "session" looking fresh.
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36',
+]
+
+function headersFor(uaIdx: number): HeadersInit {
+  return {
+    'User-Agent': USER_AGENTS[uaIdx % USER_AGENTS.length],
+    Accept: 'text/html,*/*',
+    'Accept-Language': 'en-US,en;q=0.9,pl;q=0.8',
+  }
 }
 
 interface CardRaw {
@@ -30,9 +41,9 @@ interface CardRaw {
   postedAt?: string
 }
 
-async function fetchSearchPage(keyword: string, start: number, signal?: AbortSignal): Promise<string> {
+async function fetchSearchPage(keyword: string, start: number, uaIdx: number, signal?: AbortSignal): Promise<string> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(keyword)}&location=${encodeURIComponent(LOCATION)}&start=${start}`
-  const res = await fetch(url, { headers: HEADERS, signal })
+  const res = await fetch(url, { headers: headersFor(uaIdx), signal })
   if (!res.ok) throw new Error(`LI search ${keyword} start=${start} → HTTP ${res.status}`)
   return res.text()
 }
@@ -64,9 +75,9 @@ function parseSearchCards(html: string): CardRaw[] {
 }
 
 // Returns null when the posting is closed ("no longer accepting applications").
-async function fetchDetailDescription(jobId: string, signal?: AbortSignal): Promise<string | null> {
+async function fetchDetailDescription(jobId: string, uaIdx: number, signal?: AbortSignal): Promise<string | null> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
-  const res = await fetch(url, { headers: HEADERS, signal })
+  const res = await fetch(url, { headers: headersFor(uaIdx), signal })
   if (!res.ok) throw new Error(`LI detail ${jobId} → HTTP ${res.status}`)
   const html = await res.text()
   const $ = cheerio.load(html)
@@ -113,18 +124,33 @@ export const linkedinScraper: JobScraper = {
     const seen = new Set<string>()
     const cards: CardRaw[] = []
 
-    for (const kw of KEYWORDS) {
+    for (let kwIdx = 0; kwIdx < KEYWORDS.length; kwIdx++) {
+      const kw = KEYWORDS[kwIdx]
       let start = 0
+      let consecutiveEmpty = 0
       while (start < MAX_CARDS_PER_KEYWORD) {
         let page: CardRaw[]
         try {
-          const html = await fetchSearchPage(kw, start, ctx.signal)
+          const html = await fetchSearchPage(kw, start, kwIdx, ctx.signal)
           page = parseSearchCards(html)
         } catch (e) {
           errors.push(`search "${kw}" start=${start}: ${(e as Error).message}`)
           break
         }
-        if (!page.length) break
+        if (!page.length) {
+          consecutiveEmpty++
+          // First page empty often means LinkedIn returned a soft-throttle. Retry
+          // once with a different UA after a longer sleep before giving up.
+          if (start === 0 && consecutiveEmpty === 1) {
+            await sleep(LIST_DELAY_MS * 6)
+            try {
+              const html2 = await fetchSearchPage(kw, start, kwIdx + 1, ctx.signal)
+              page = parseSearchCards(html2)
+            } catch {}
+          }
+          if (!page.length) break
+          consecutiveEmpty = 0
+        }
         for (const c of page) {
           if (seen.has(c.id)) continue
           seen.add(c.id)
@@ -135,9 +161,10 @@ export const linkedinScraper: JobScraper = {
       }
     }
 
-    for (const c of cards) {
+    for (let i = 0; i < cards.length; i++) {
+      const c = cards[i]
       try {
-        const desc = await fetchDetailDescription(c.id, ctx.signal)
+        const desc = await fetchDetailDescription(c.id, i, ctx.signal)
         if (desc === null) { closedIds.push(c.id); continue }
         jobs.push(buildRawJob(c, desc))
       } catch (e) {

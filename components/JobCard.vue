@@ -189,6 +189,8 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
         <div class="meta">
           <span v-if="group.isStale" class="pill pill-stale" :title="staleTooltip">Archiwum</span>
           <span v-if="group.vueInTitle" class="pill pill-vue-strong">Vue w tytule</span>
+          <span v-else-if="group.vueRelevance === 'required'" class="pill pill-vue">Vue w stacku</span>
+          <span v-else-if="group.vueRelevance === 'mention'" class="pill pill-vue-weak" title="Vue tylko jako mile widziane">Vue jako plus</span>
           <span v-else-if="group.hasVue" class="pill pill-vue">Vue w opisie</span>
           <span v-if="group.hasReact" class="pill pill-react">React</span>
           <span v-if="group.hasAngular" class="pill pill-angular">Angular</span>
@@ -366,6 +368,7 @@ const swipeIconScale = computed(() => 1 + swipePct.value * 0.4)
 }
 .pill-vue        { background: rgba(65, 184, 131, 0.15); color: var(--vue); }
 .pill-vue-strong { background: var(--vue); color: white; }
+.pill-vue-weak   { background: rgba(148, 163, 184, 0.18); color: #94a3b8; font-style: italic; }
 .pill-react      { background: rgba(97, 218, 251, 0.15); color: #61dafb; }
 .pill-angular    { background: rgba(221, 0, 49, 0.15); color: #ff5e7e; }
 .pill-stale      { background: rgba(148, 163, 184, 0.25); color: #cbd5e1; }

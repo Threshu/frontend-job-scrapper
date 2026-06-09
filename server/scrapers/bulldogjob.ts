@@ -9,9 +9,12 @@ import type {
 
 const SLUG_PAGES = [
 	"https://bulldogjob.com/companies/jobs/s/skills,Vue.js",
+	"https://bulldogjob.com/companies/jobs/s/skills,Nuxt.js",
 	"https://bulldogjob.com/companies/jobs/s/category,frontend",
+	"https://bulldogjob.com/companies/jobs/s/category,full-stack",
 	"https://bulldogjob.com/companies/jobs/s/skills,React",
 	"https://bulldogjob.com/companies/jobs/s/skills,JavaScript",
+	"https://bulldogjob.com/companies/jobs/s/skills,TypeScript",
 ];
 
 const HEADERS: HeadersInit = {

@@ -12,6 +12,9 @@ const LIST_PAGES = [
   'https://theprotocol.it/filtry/javascript;t',
   'https://theprotocol.it/filtry/frontend;sp',
   'https://theprotocol.it/filtry/vue.js;t',
+  'https://theprotocol.it/filtry/nuxt.js;t',
+  'https://theprotocol.it/filtry/typescript;t',
+  'https://theprotocol.it/filtry/fullstack;sp',
 ]
 const MAX_PAGES_PER_LIST = 3
 
