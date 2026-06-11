@@ -50,6 +50,10 @@ function lastMatchIndex(text: string, re: RegExp): number {
   return last
 }
 
+export function vueInTitle(title: string): boolean {
+  return VUE_RE.test(title)
+}
+
 export function classifyVueRelevance(
   title: string,
   description: string,

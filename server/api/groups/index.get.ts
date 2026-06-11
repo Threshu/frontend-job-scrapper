@@ -1,5 +1,6 @@
 import { useDb } from '../../db'
 import type { GroupRow, ListingRow } from '../../db/repository'
+import { vueInTitle as hasVueInTitle } from '../../lib/vueDetector'
 
 export interface GroupDto {
   id: number
@@ -130,10 +131,10 @@ export default defineEventHandler((event) => {
     if (sourceFilter) params.push(sourceFilter)
   }
   if (vueInTitle) {
-    where.push(`EXISTS (
-      SELECT 1 FROM job_listings l
-      WHERE l.group_id = g.id AND l.vue_in_title = 1
-    )`)
+    // Check the canonical title of the group (what the user sees), not individual
+    // listing titles — a listing from another source in the same group could have
+    // "Vue" in its title without the displayed role being a Vue role.
+    where.push(`LOWER(g.canonical_title) LIKE '%vue%'`)
   }
   if (relevanceAllowed) {
     const placeholders = relevanceAllowed.map(() => '?').join(',')
@@ -177,7 +178,7 @@ export default defineEventHandler((event) => {
     ]
     const likeClauses = noisePatterns.map(() => `LOWER(g.canonical_title) LIKE ?`).join(' OR ')
     where.push(`(
-      EXISTS (SELECT 1 FROM job_listings ln WHERE ln.group_id = g.id AND ln.vue_in_title = 1)
+      LOWER(g.canonical_title) LIKE '%vue%'
       OR NOT (${likeClauses})
     )`)
     params.push(...noisePatterns)
@@ -262,7 +263,7 @@ export default defineEventHandler((event) => {
       hasReact: ls.some((l) => l.has_react),
       hasAngular: ls.some((l) => l.has_angular),
       hasSvelte: ls.some((l) => l.has_svelte),
-      vueInTitle: ls.some((l) => l.vue_in_title),
+      vueInTitle: hasVueInTitle(g.canonical_title),
       vueRelevance: strongest,
       isStale: groupStale,
       bestSalary,
