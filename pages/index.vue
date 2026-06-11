@@ -218,6 +218,7 @@
 			</div>
 		</header>
 
+		<div class="left-panels">
 		<div v-if="progressData" class="scrape-progress">
 			<div class="sp-head">
 				<span class="sp-title">{{
@@ -266,6 +267,9 @@
 					<span v-if="s.needsBrowser" class="sp-browser">przeglądarka</span>
 				</div>
 			</div>
+		</div>
+
+		<SalaryCalculator />
 		</div>
 
 		<p v-if="scrapeMessage" class="scrape-msg">{{ scrapeMessage }}</p>
@@ -380,17 +384,26 @@
 		align-self: center;
 	}
 
-	/* ── Scrape progress panel ── */
-	.scrape-progress {
+	/* ── Left fixed panels (scrape progress + salary calculator) ── */
+	.left-panels {
 		position: fixed;
 		left: 1rem;
 		top: 1.5rem;
-		width: 280px;
+		width: 320px;
 		z-index: 100;
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		max-height: calc(100vh - 3rem);
+		overflow-y: auto;
+	}
+
+	.scrape-progress {
 		background: var(--card);
 		border: 1px solid var(--border);
 		border-radius: 0.5rem;
 		padding: 0.9rem 1rem;
+		flex-shrink: 0;
 	}
 	.sp-head {
 		display: flex;

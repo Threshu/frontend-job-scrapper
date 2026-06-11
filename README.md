@@ -23,6 +23,9 @@ duplikaty z różnych źródeł i pozwala śledzić status aplikacji.
 - **Powiadomienia desktop** (Web Notifications API) gdy cron znajdzie nowe oferty
 - **Cron** scrapuje w tle co X minut + przycisk "Scrapuj teraz" w UI
 - **Filtry**: status, źródło, "tylko z Vue", search po firmie/tytule, "pokaż archiwum"
+- **Kalkulator stawki** (panel boczny): przelicza stawkę godzinową/miesięczną/roczną
+  w trybach B2B netto, UoP brutto i UoP netto; wyświetla równowartość w PLN/USD/EUR
+  z kursami pobieranymi live z API NBP
 - **Wykrywanie nieaktualnych** ofert: listing jest stale gdy nie był widziany
   przez >7 dni LUB jego `posted_at` jest starszy niż 60 dni (progi konfigurowalne).
   Grupa stale = wszystkie listingi stale. Stale ukrywane domyślnie
