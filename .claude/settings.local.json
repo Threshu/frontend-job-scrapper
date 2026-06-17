@@ -118,7 +118,9 @@
       "Bash(grep -oP '\"salary[^\"]*\":\"[^\"]{3,50}\"')",
       "Bash(grep -oP 'push\\\\\\(\\\\[1,\"[^\"]{200,}\"')",
       "Bash(grep -oP '\"href\":\"/praca/[^\"]{5,80}\"')",
-      "Bash(awk '{print $2}')"
+      "Bash(awk '{print $2}')",
+      "Bash(npx --yes playwright@latest chromium --version)",
+      "Bash(taskkill /F /IM node.exe)"
     ]
   }
 }
