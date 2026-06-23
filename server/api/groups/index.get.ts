@@ -161,6 +161,8 @@ export default defineEventHandler((event) => {
       // Role niedev
       '%qa engineer%', '%quality engineer%', '%quality assurance%',
       '%tester manualny%', '%engineer in test%',
+      '%vice president%', '%vp,%', '%vp %',
+      '%head of %', '%chief %',
       '%director%', '%directeur%', '%ingénierie%',
       '%telco%', '%telecom%',
       '% manager%', '% analyst%', '% designer%',

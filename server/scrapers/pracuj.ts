@@ -3,30 +3,16 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience,
 } from './types'
-import { fetchPagesNextDataSequential, type NextDataResult } from '../lib/browser'
 
-// Pracuj.pl serves SSR pages with everything we need embedded in
-// __NEXT_DATA__. No detail fetch required — `jobDescription` is already on
-// the list payload.
+// Pracuj.pl exposes a JSON API at massachusetts.pracuj.pl that powers their
+// SPA — no Playwright needed. The endpoint returns the same groupedOffers
+// structure as __NEXT_DATA__, so all parsing helpers are unchanged.
 //
-// We pull a few frontend-flavoured search URLs and paginate via ?pn=N. The
-// pages return 50 grouped offers each (each "group" may have multiple
-// per-city listings under `offers[]`).
-// Only paths confirmed to return __NEXT_DATA__ via Playwright.
-// The `;kw` suffix is Pracuj's keyword filter. Short or spaced keywords
-// ("/praca/vue;kw", "/praca/front%20end%20developer;kw") return plain HTML
-// without __NEXT_DATA__ and are skipped. react.js and typescript follow the
-// same format as the confirmed-working vue.js path.
-const SEARCH_PATHS = [
-  '/praca/vue.js;kw',
-  '/praca/nuxt.js;kw',
-  '/praca/react.js;kw',
-  '/praca/typescript;kw',
-  '/praca/frontend-developer;kw',
-  '/praca/javascript;kw',
-]
-const MAX_PAGES_PER_SEARCH = 5
-
+// Endpoint: GET /jobOffers/listing/grouped
+// Pagination: offset + limit params; metadata.total gives the cap.
+const API_BASE = 'https://massachusetts.pracuj.pl/jobOffers/listing/grouped'
+const KEYWORDS = ['vue.js', 'nuxt.js', 'react.js', 'typescript', 'frontend developer', 'javascript']
+const PAGE_SIZE = 100
 
 interface PracujOffer {
   offerAbsoluteUri?: string
@@ -39,28 +25,24 @@ interface PracujGroup {
   jobTitle: string
   companyName: string
   jobDescription?: string
-  aboutProjectShortDescription?: string
+  aiSummary?: string
   technologies?: string[]
   salaryDisplayText?: string | null
   lastPublicated?: string
-  isRemoteWorkAllowed?: boolean
   workModes?: string[]
   positionLevels?: string[]
   typesOfContract?: string[]
   offers?: PracujOffer[]
 }
 
-function findGroupedOffers(obj: unknown): PracujGroup[] | null {
-  if (!obj || typeof obj !== 'object') return null
-  const o = obj as Record<string, unknown>
-  if (Array.isArray(o.groupedOffers) && o.groupedOffers.length && (o.groupedOffers[0] as PracujGroup).jobTitle) {
-    return o.groupedOffers as PracujGroup[]
+interface PracujApiResponse {
+  groupedOffers: PracujGroup[]
+  metadata: {
+    offset: number
+    limit: number
+    size: number
+    total: number
   }
-  for (const k of Object.keys(o)) {
-    const r = findGroupedOffers(o[k])
-    if (r) return r
-  }
-  return null
 }
 
 function mapExperience(levels?: string[]): Experience | undefined {
@@ -81,9 +63,6 @@ function mapContract(contracts?: string[]): ContractType | undefined {
   return undefined
 }
 
-// Pracuj salary fields are free-text like "115–130 zł netto (+ VAT) / godz." or
-// "10 000–14 000 zł brutto / mc". We try to extract a numeric range; on failure
-// we leave it null and the UI shows nothing.
 function parseSalary(text?: string | null): { min?: number; max?: number; currency?: string; period?: 'month' | 'hour' } {
   if (!text) return {}
   const cleaned = text.replace(/\s+/g, ' ')
@@ -106,15 +85,16 @@ function htmlToText(s: string | undefined): string {
 
 function buildRawJob(g: PracujGroup): RawJob | null {
   if (!g.jobTitle || !g.companyName) return null
-  // Prefer the first offer URL as canonical; if a group spans multiple cities,
-  // we still treat it as one logical job for dedup purposes.
   const firstOffer = g.offers?.[0]
-  const url = firstOffer?.offerAbsoluteUri ?? `https://www.pracuj.pl/praca/${g.groupId}`
+  const url = firstOffer?.offerAbsoluteUri?.split('?')[0] ?? `https://www.pracuj.pl/praca/${g.groupId}`
+  // API listing includes a truncated jobDescription + an AI summary in HTML.
+  // Combine both so the Vue detector has the best chance of matching keywords.
   const description = [
-    htmlToText(g.aboutProjectShortDescription),
     htmlToText(g.jobDescription),
+    htmlToText(g.aiSummary),
   ].filter(Boolean).join('\n\n')
   const sal = parseSalary(g.salaryDisplayText ?? undefined)
+  const isRemote = (g.workModes ?? []).some((w) => /zdalna|remote/i.test(w))
   return {
     source: 'pracuj',
     sourceId: g.groupId,
@@ -122,7 +102,7 @@ function buildRawJob(g: PracujGroup): RawJob | null {
     title: g.jobTitle,
     company: g.companyName,
     location: firstOffer?.displayWorkplace,
-    remote: !!g.isRemoteWorkAllowed || (g.workModes ?? []).some((w) => /zdalna|remote/i.test(w)),
+    remote: isRemote,
     salaryMin: sal.min,
     salaryMax: sal.max,
     currency: sal.currency,
@@ -135,49 +115,55 @@ function buildRawJob(g: PracujGroup): RawJob | null {
   }
 }
 
+function apiHeaders(keyword: string): HeadersInit {
+  return {
+    'Accept': 'application/json',
+    'Accept-Language': 'pl-PL,pl;q=0.9,en;q=0.8',
+    'Referer': `https://it.pracuj.pl/praca/${encodeURIComponent(keyword)};kw`,
+    'Origin': 'https://it.pracuj.pl',
+  }
+}
+
 export const pracujScraper: JobScraper = {
   source: 'pracuj',
   displayName: 'Pracuj.pl',
-  capabilities: { needsBrowser: true, supportsKeywordFilter: true },
+  capabilities: { needsBrowser: false, supportsKeywordFilter: true },
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []
     const jobs: RawJob[] = []
     const seen = new Set<string>()
 
-    for (const path of SEARCH_PATHS) {
-      // Build all page URLs for this search path upfront.
-      // Prepend the homepage as a warm-up so Pracuj sees natural navigation
-      // (homepage → search page 1 → page 2 …) within a single browser session.
-      const urls = [
-        'https://www.pracuj.pl',
-        ...Array.from({ length: MAX_PAGES_PER_SEARCH }, (_, i) =>
-          `https://www.pracuj.pl${path}${i > 0 ? `?pn=${i + 1}` : ''}`
-        ),
-      ]
+    for (const keyword of KEYWORDS) {
+      let offset = 0
+      let total = Infinity
 
-      let dataPages: NextDataResult[]
-      try {
-        dataPages = await fetchPagesNextDataSequential(urls, {
-          pageDelayMs: 1500,
-          // Cloudflare challenge needs more breathing room on Pracuj.
-          maxChallengeWaitMs: 60_000,
-        })
-      } catch (e) {
-        errors.push(`${path}: ${(e as Error).message}`)
-        continue
-      }
+      while (offset < total) {
+        const url = new URL(API_BASE)
+        url.searchParams.set('keyword', keyword)
+        url.searchParams.set('languageCode', 'pl')
+        url.searchParams.set('offset', String(offset))
+        url.searchParams.set('limit', String(PAGE_SIZE))
+        url.searchParams.set('sc', '0')
+        url.searchParams.set('source', 'pracujpl')
+        url.searchParams.set('context', 'list')
 
-      // Skip index 0 (homepage warm-up), process pages 1…N
-      for (let i = 1; i < dataPages.length; i++) {
-        const { data, pageTitle } = dataPages[i]
-        const pageNum = i  // 1-based
-        if (!data) {
-          const hint = pageTitle ? ` (page: "${pageTitle}")` : ''
-          errors.push(`${path} page ${pageNum}: __NEXT_DATA__ not found${hint}`)
+        let data: PracujApiResponse
+        try {
+          const res = await fetch(url.toString(), {
+            headers: apiHeaders(keyword),
+            signal: ctx.signal,
+          })
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          data = await res.json() as PracujApiResponse
+        } catch (e) {
+          errors.push(`keyword "${keyword}" offset=${offset}: ${(e as Error).message}`)
           break
         }
-        const groups = findGroupedOffers(data) ?? []
+
+        const groups = data.groupedOffers ?? []
+        if (data.metadata?.total !== undefined) total = data.metadata.total
+
         if (!groups.length) break
 
         for (const g of groups) {
@@ -190,6 +176,9 @@ export const pracujScraper: JobScraper = {
             return { source: this.source, jobs, errors }
           }
         }
+
+        offset += groups.length
+        if (groups.length < PAGE_SIZE) break
       }
     }
 

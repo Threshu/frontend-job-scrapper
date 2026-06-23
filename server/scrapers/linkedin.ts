@@ -74,10 +74,11 @@ function parseSearchCards(html: string): CardRaw[] {
   return cards
 }
 
-// Returns null when the posting is closed ("no longer accepting applications").
+// Returns null when the posting is closed or gone (404 / "no longer accepting applications").
 async function fetchDetailDescription(jobId: string, uaIdx: number, signal?: AbortSignal): Promise<string | null> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
   const res = await fetch(url, { headers: headersFor(uaIdx), signal })
+  if (res.status === 404) return null
   if (!res.ok) throw new Error(`LI detail ${jobId} → HTTP ${res.status}`)
   const html = await res.text()
   const $ = cheerio.load(html)

@@ -25,9 +25,9 @@ import { remotiveScraper } from './remotive'
 // Registry of available scrapers. Add a new portal by importing its scraper
 // here. The orchestrator iterates this list and isolates failures per source.
 //
-// Tier 1 (plain JSON APIs):    justjoin, nofluffjobs, rocketjobs, remoteok, remotive
+// Tier 1 (plain JSON APIs):    justjoin, nofluffjobs, rocketjobs, remoteok, remotive, pracuj
 // Tier 2 (HTML w/o browser):   bulldogjob, linkedin
-// Tier 3 (Playwright):         pracuj, theprotocol, indeed
+// Tier 3 (Playwright):         theprotocol, indeed
 // Jooble disabled: API returns tracking URLs that redirect to jobleads.com / appcast.io —
 // final destination is only visible after a redirect, so URL-based filtering is not feasible.
 export const SCRAPERS: JobScraper[] = [

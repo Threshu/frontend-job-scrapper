@@ -1,4 +1,5 @@
-import { chromium, type Browser, type BrowserContext } from 'playwright'
+import { chromium } from 'playwright-core'
+import type { Browser, BrowserContext } from 'playwright-core'
 import { existsSync, mkdirSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
@@ -42,39 +43,80 @@ async function ensureContext(): Promise<BrowserContext> {
     extraHTTPHeaders: { 'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7' },
     storageState,
   })
-  // Anti-bot patches applied to every page in this context.
-  // These make headless Chromium look like a normal Chrome install to
-  // Cloudflare's JS challenge and similar bot-detection scripts.
+
+  // Manual anti-bot evasions — playwright-extra + stealth plugin used CJS
+  // dynamic require() which breaks in Nitro's ESM environment. We replicate
+  // the most important evasions inline instead.
   await _context.addInitScript(() => {
-    // 1. Remove webdriver flag
-    Object.defineProperty(navigator, 'webdriver', { get: () => undefined })
+    // Remove webdriver flag (Chromium's --disable-blink-features=AutomationControlled
+    // handles the property itself, but some frameworks also check the proto chain)
+    Object.defineProperty(navigator, 'webdriver', { get: () => false })
 
-    // 2. Fake the chrome runtime object (absent in headless Chromium)
-    ;(window as unknown as Record<string, unknown>).chrome = {
-      runtime: {},
-      app: { isInstalled: false, getDetails: () => null, getIsInstalled: () => false, installState: () => {} },
-      loadTimes: () => ({}),
-      csi: () => ({}),
-    }
+    // vendor / platform
+    Object.defineProperty(navigator, 'vendor', { get: () => 'Google Inc.' })
+    Object.defineProperty(navigator, 'platform', { get: () => 'Win32' })
 
-    // 3. Fake a non-zero plugins list (headless has 0)
-    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] })
-
-    // 4. Consistent languages
+    // Consistent languages
     Object.defineProperty(navigator, 'languages', { get: () => ['pl-PL', 'pl', 'en-US', 'en'] })
 
-    // 5. Permissions API — return 'default' for notifications (headless returns 'denied')
-    const origQuery = navigator.permissions.query.bind(navigator.permissions)
-    navigator.permissions.query = (desc: PermissionDescriptor) =>
-      desc.name === 'notifications'
-        ? Promise.resolve({ state: 'default' } as unknown as PermissionStatus)
-        : origQuery(desc)
-
-    // 6. Hardware concurrency and device memory (headless often returns low/0 values)
+    // Hardware concurrency and device memory
     Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 })
     Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 })
 
-    // 7. User-Agent Client Hints — must match the User-Agent string
+    // window dimensions — headless default is 0×0 which is a strong signal
+    Object.defineProperty(window, 'outerWidth', { get: () => 1280 })
+    Object.defineProperty(window, 'outerHeight', { get: () => 800 })
+    Object.defineProperty(window, 'innerWidth', { get: () => 1280 })
+    Object.defineProperty(window, 'innerHeight', { get: () => 800 })
+
+    // Fake plugins list — real Chrome reports ~5 plugins; empty list is a bot signal
+    const pluginData = [
+      { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+      { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+      { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+    ]
+    const makePlugin = (d: typeof pluginData[0]) => {
+      const plugin = Object.create(Plugin.prototype)
+      Object.defineProperty(plugin, 'name', { get: () => d.name })
+      Object.defineProperty(plugin, 'filename', { get: () => d.filename })
+      Object.defineProperty(plugin, 'description', { get: () => d.description })
+      Object.defineProperty(plugin, 'length', { get: () => 0 })
+      return plugin
+    }
+    const plugins = pluginData.map(makePlugin)
+    const pluginArray = Object.create(PluginArray.prototype)
+    Object.defineProperty(pluginArray, 'length', { get: () => plugins.length })
+    plugins.forEach((p, i) => Object.defineProperty(pluginArray, i, { get: () => p }))
+    pluginArray.item = (i: number) => plugins[i] ?? null
+    pluginArray.namedItem = (name: string) => plugins.find((p) => p.name === name) ?? null
+    pluginArray[Symbol.iterator] = function* () { yield* plugins }
+    Object.defineProperty(navigator, 'plugins', { get: () => pluginArray })
+    Object.defineProperty(navigator, 'mimeTypes', { get: () => Object.create(MimeTypeArray.prototype) })
+
+    // chrome global — bots are caught by the absence of window.chrome
+    if (!(window as unknown as Record<string, unknown>).chrome) {
+      const chrome = {
+        app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } },
+        runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {} },
+        loadTimes: () => ({}),
+        csi: () => ({}),
+      }
+      Object.defineProperty(window, 'chrome', { get: () => chrome, configurable: true })
+    }
+
+    // permissions.query — real Chrome returns "granted"/"denied"/"prompt" for
+    // automation-detectable permissions. Override to always return "prompt".
+    const originalQuery = window.navigator.permissions?.query?.bind(navigator.permissions)
+    if (originalQuery) {
+      Object.defineProperty(navigator.permissions, 'query', {
+        value: (params: PermissionDescriptor) =>
+          params.name === 'notifications'
+            ? Promise.resolve({ state: 'prompt', onchange: null } as PermissionStatus)
+            : originalQuery(params),
+      })
+    }
+
+    // User-Agent Client Hints — must match the User-Agent string
     Object.defineProperty(navigator, 'userAgentData', {
       get: () => ({
         brands: [

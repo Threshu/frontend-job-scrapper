@@ -19,6 +19,7 @@
 		newListings: number;
 		newGroups: number;
 		errors: string[];
+		durationMs: number;
 	}
 
 	interface ScrapeProgressData {
@@ -75,6 +76,15 @@
 		const m = Math.floor(s / 60);
 		const sec = s % 60;
 		return m > 0 ? `${m}:${String(sec).padStart(2, "0")}` : `${s}s`;
+	}
+
+	function fmtDuration(ms: number): string {
+		if (!ms) return "";
+		const s = Math.round(ms / 1000);
+		if (s < 60) return `${s}s`;
+		const m = Math.floor(s / 60);
+		const rem = s % 60;
+		return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 	}
 
 	function stopProgress() {
@@ -178,9 +188,6 @@
 				if (fresh > 0) {
 					notify(`${fresh} nowa oferta`, { body: "Sprawdź listę" });
 				}
-				setTimeout(() => {
-					progressData.value = null;
-				}, 8000);
 			}
 		} catch (e) {
 			stopProgress();
@@ -229,6 +236,12 @@
 					>{{ progressData.completed.length }} /
 					{{ progressData.total }} źródeł</span
 				>
+				<button
+					v-if="!running"
+					class="sp-close"
+					@click="progressData = null"
+					title="Zamknij"
+				>×</button>
 			</div>
 			<div class="sp-bar-track">
 				<div class="sp-bar-fill" :style="{ width: `${progressPct}%` }" />
@@ -245,6 +258,7 @@
 						<span class="sp-stat"
 							>{{ c.fetched }} pobranych · {{ c.newGroups }} na liście</span
 						>
+						<span v-if="c.durationMs" class="sp-dur">{{ fmtDuration(c.durationMs) }}</span>
 					</div>
 					<div v-if="c.shownErrors.length" class="sp-errs">
 						<p
@@ -411,6 +425,22 @@
 		gap: 0.6rem;
 		margin-bottom: 0.6rem;
 	}
+	.sp-close {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: var(--muted);
+		font-size: 1.1rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 0.1rem;
+		opacity: 0.6;
+		flex-shrink: 0;
+		&:hover {
+			opacity: 1;
+			color: var(--fg);
+		}
+	}
 	.sp-title {
 		font-size: 0.9rem;
 		font-weight: 600;
@@ -460,6 +490,14 @@
 	}
 	.sp-stat {
 		color: var(--muted);
+		flex: 1;
+	}
+	.sp-dur {
+		font-size: 0.72rem;
+		color: var(--muted);
+		opacity: 0.6;
+		margin-left: auto;
+		flex-shrink: 0;
 	}
 	.sp-browser {
 		font-size: 0.72rem;

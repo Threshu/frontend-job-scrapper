@@ -14,6 +14,7 @@ export interface OrchestratorRunResult {
     newListings: number
     newGroups: number
     errors: string[]
+    durationMs: number
   }>
 }
 
@@ -55,7 +56,8 @@ async function runOne(
   ctx: ScrapeContext,
   db: Database,
 ): Promise<OrchestratorRunResult['perSource'][number]> {
-  const result = { source: scraper.source, fetched: 0, newListings: 0, newGroups: 0, errors: [] as string[] }
+  const t0 = Date.now()
+  const result = { source: scraper.source, fetched: 0, newListings: 0, newGroups: 0, errors: [] as string[], durationMs: 0 }
   try {
     const out = await scraper.scrape(ctx)
     result.fetched = out.jobs.length
@@ -75,6 +77,7 @@ async function runOne(
     result.errors.push(msg)
     recordScrapeRun(scraper.source, 'error', 0, 0, msg, db)
   }
+  result.durationMs = Date.now() - t0
   return result
 }
 

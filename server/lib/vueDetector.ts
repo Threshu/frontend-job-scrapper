@@ -54,6 +54,10 @@ export function vueInTitle(title: string): boolean {
   return VUE_RE.test(title)
 }
 
+// Titles that clearly indicate a non-developer role. Vue appearing in skills
+// for these is "our tech stack" context, not a skill requirement.
+const NON_DEV_TITLE_RE = /\bvice[\s-]president\b|\bvp\b|\bhead\s+of\b|\bchief\s+(executive|operating|people|hr|financial|revenue|marketing)\b|\borganiz\w+\s+(effectiveness|strategy)\b|\bworkforce\s+strategy\b/i
+
 export function classifyVueRelevance(
   title: string,
   description: string,
@@ -65,6 +69,9 @@ export function classifyVueRelevance(
   const descHasVue = VUE_RE.test(description)
 
   if (!skillsHasVue && !descHasVue) return 'none'
+
+  // Non-developer titles: cap at mention regardless of where Vue appears.
+  if (NON_DEV_TITLE_RE.test(title)) return 'mention'
 
   if (descHasVue) {
     const m = description.match(VUE_RE)

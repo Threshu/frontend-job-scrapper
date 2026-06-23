@@ -69,17 +69,28 @@ function row(label: string, pln: number, isNet = false) {
 
 const isUop = computed(() => mode.value !== 'b2b')
 
+const VAT = 1.23
+
 const rows = computed(() => {
-	const tag = isUop.value ? 'brutto' : 'netto'
-	const r = [
-		row(`/h ${tag}`, hourly.value),
-		row(`/mies. ${tag}`, monthlyGross.value),
-	]
-	if (monthlyNet.value !== null) {
-		r.push(row('/mies. netto', monthlyNet.value, true))
+	const h = hoursPerMonth.value || 168
+	if (!isUop.value) {
+		return [
+			row('/h netto', hourly.value),
+			row('/h brutto', hourly.value * VAT, true),
+			row('/mies. netto', monthlyGross.value),
+			row('/mies. brutto', monthlyGross.value * VAT, true),
+			row('/rok netto', yearly.value),
+			row('/rok brutto', yearly.value * VAT, true),
+		]
 	}
-	r.push(row(`/rok ${tag}`, yearly.value))
-	return r
+	return [
+		row('/h brutto', hourly.value),
+		row('/h netto', monthlyNet.value! / h, true),
+		row('/mies. brutto', monthlyGross.value),
+		row('/mies. netto', monthlyNet.value!, true),
+		row('/rok brutto', yearly.value),
+		row('/rok netto', monthlyNet.value! * 12, true),
+	]
 })
 
 const inputLabel = computed(() => {
