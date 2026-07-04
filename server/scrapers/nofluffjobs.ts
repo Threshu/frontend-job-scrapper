@@ -158,10 +158,17 @@ function listingToRaw(p: NfjPosting): RawJob {
   }
 }
 
-const REQUEST_DELAY_MS = 150
+const REQUEST_DELAY_MS = 350
+const REQUEST_JITTER_MS = 200
+// NFJ's detail endpoint 502s under fast sequential load; brief backoff clears it.
+const DETAIL_RETRY_DELAYS_MS = [800, 2000, 4500]
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+function nextDelay(): number {
+  return REQUEST_DELAY_MS + Math.floor(Math.random() * REQUEST_JITTER_MS)
 }
 
 async function search(criteria: { requirement?: string[]; category?: string[] }, pageSize = 200, signal?: AbortSignal): Promise<NfjPosting[]> {
@@ -177,9 +184,18 @@ async function search(criteria: { requirement?: string[]; category?: string[] },
 }
 
 async function fetchDetail(slug: string, signal?: AbortSignal): Promise<NfjDetail> {
-  const res = await fetch(DETAIL_URL(slug), { headers: HEADERS, signal })
-  if (!res.ok) throw new Error(`NFJ detail ${slug} → HTTP ${res.status}`)
-  return res.json() as Promise<NfjDetail>
+  let lastStatus = 0
+  for (let attempt = 0; attempt <= DETAIL_RETRY_DELAYS_MS.length; attempt++) {
+    const res = await fetch(DETAIL_URL(slug), { headers: HEADERS, signal })
+    if (res.ok) return res.json() as Promise<NfjDetail>
+    lastStatus = res.status
+    // Only retry on transient upstream errors; 4xx means the slug is gone/blocked.
+    if (res.status < 500 || res.status === 501) break
+    const delay = DETAIL_RETRY_DELAYS_MS[attempt]
+    if (delay === undefined) break
+    await sleep(delay)
+  }
+  throw new Error(`NFJ detail ${slug} → HTTP ${lastStatus}`)
 }
 
 export const nofluffjobsScraper: JobScraper = {
@@ -218,7 +234,7 @@ export const nofluffjobsScraper: JobScraper = {
         if (ctx.maxResults && jobs.length >= ctx.maxResults) {
           return { source: this.source, jobs, errors }
         }
-        await sleep(REQUEST_DELAY_MS)
+        await sleep(nextDelay())
       }
     }
 
