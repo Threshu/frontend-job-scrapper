@@ -2,6 +2,7 @@ import * as cheerio from 'cheerio'
 import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
 } from './types'
+import { fmtErr } from './types'
 
 // LinkedIn's guest job feed is served by an unauthenticated endpoint used by
 // their public job search page:
@@ -135,7 +136,7 @@ export const linkedinScraper: JobScraper = {
           const html = await fetchSearchPage(kw, start, kwIdx, ctx.signal)
           page = parseSearchCards(html)
         } catch (e) {
-          errors.push(`search "${kw}" start=${start}: ${(e as Error).message}`)
+          errors.push(`search "${kw}" start=${start}: ${fmtErr(e)}`)
           break
         }
         if (!page.length) {
@@ -171,7 +172,7 @@ export const linkedinScraper: JobScraper = {
       } catch (e) {
         // 429 rate-limit on detail — save card without description rather than discarding it
         const msg = (e as Error).message
-        if (!msg.includes('429')) errors.push(`detail ${c.id}: ${msg}`)
+        if (!msg.includes('429')) errors.push(`detail ${c.id}: ${fmtErr(e)}`)
         jobs.push(buildRawJob(c, ''))
       }
       if (ctx.maxResults && jobs.length >= ctx.maxResults) {

@@ -1,67 +1,65 @@
 <script setup lang="ts">
 	const { activeTab, sortedGroups, loading, refresh } = useJobs();
-	const { running, trigger } = useScrape();
+	const {
+		running,
+		progressData,
+		panelVisible,
+		allSources,
+		scrapeMessage,
+		trigger,
+		dismiss,
+		refreshStatus,
+		ensureSources,
+	} = useScrape();
 	const { newCount, peek, markVisited } = useNewCount();
 	const { notifySupport, requestPermission, notify, permission } =
 		useNotifications();
-
-	const scrapeMessage = ref<string>("");
-
-	interface SourceInfo {
-		source: string;
-		displayName: string;
-		needsBrowser: boolean;
-	}
-
-	interface CompletedSource {
-		source: string;
-		fetched: number;
-		newListings: number;
-		newGroups: number;
-		errors: string[];
-		durationMs: number;
-	}
-
-	interface ScrapeProgressData {
-		running: boolean;
-		startedAt: string | null;
-		total: number;
-		completed: CompletedSource[];
-	}
-
-	const progressData = ref<ScrapeProgressData | null>(null);
-	const allSources = ref<SourceInfo[]>([]);
-	const elapsedSeconds = ref(0);
-
-	let progressTimer: ReturnType<typeof setInterval> | null = null;
-	let elapsedTimer: ReturnType<typeof setInterval> | null = null;
 
 	const sourceMap = computed(
 		() => new Map(allSources.value.map((s) => [s.source, s])),
 	);
 
-	const MAX_ERRORS_SHOWN = 3
+	const MAX_ERRORS_SHOWN = 3;
+
+	// Reactive "now" tick so elapsed time updates smoothly even after the run
+	// finishes (freezes at finishedAt-startedAt via the computed below).
+	// useState so SSR and hydration see the same initial value — a plain
+	// ref(Date.now()) drifts by however long hydration took and mismatches.
+	const nowMs = useState<number>("scrapeNowMs", () => Date.now());
+
+	const elapsedSeconds = computed(() => {
+		const p = progressData.value;
+		if (!p?.startedAt) return 0;
+		const start = new Date(p.startedAt).getTime();
+		const end = p.running
+			? nowMs.value
+			: p.finishedAt
+				? new Date(p.finishedAt).getTime()
+				: nowMs.value;
+		return Math.max(0, Math.floor((end - start) / 1000));
+	});
 
 	const completedWithInfo = computed(() =>
 		(progressData.value?.completed ?? []).map((c) => {
 			// 403/apollo-state are partial failures — jobs were still saved via fallback.
 			// Only treat as ⚠ when the scraper collected nothing at all.
 			const criticalErrors = c.errors.filter(
-				(e) => !e.includes('HTTP 403') && !e.includes('not in apollo state'),
-			)
-			const hasWarning = c.errors.length > 0 && (criticalErrors.length > 0 || c.fetched === 0)
+				(e) => !e.includes("HTTP 403") && !e.includes("not in apollo state"),
+			);
+			const hasWarning =
+				c.errors.length > 0 && (criticalErrors.length > 0 || c.fetched === 0);
 			return {
 				...c,
 				displayName: sourceMap.value.get(c.source)?.displayName ?? c.source,
 				shownErrors: c.errors.slice(0, MAX_ERRORS_SHOWN),
 				hiddenErrorCount: Math.max(0, c.errors.length - MAX_ERRORS_SHOWN),
 				hasWarning,
-			}
+			};
 		}),
 	);
 
 	const pendingSources = computed(() => {
-		if (!progressData.value) return [];
+		if (!progressData.value?.running) return [];
 		const done = new Set(progressData.value.completed.map((c) => c.source));
 		return allSources.value.filter((s) => !done.has(s.source));
 	});
@@ -87,45 +85,62 @@
 		return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 	}
 
-	function stopProgress() {
-		if (progressTimer) {
-			clearInterval(progressTimer);
-			progressTimer = null;
-		}
-		if (elapsedTimer) {
-			clearInterval(elapsedTimer);
-			elapsedTimer = null;
-		}
-	}
+	// SSR-safe initial load: fetch groups, new count, scrape status, and source
+	// list in parallel so the button state (disabled if server is scraping) is
+	// correct on first paint, without stacking sequential awaits.
+	await Promise.all([refresh(), peek(), refreshStatus(), ensureSources()]);
 
-	async function pollProgress() {
-		try {
-			const data = await $fetch<ScrapeProgressData>("/api/scrape/status");
-			if (progressData.value) progressData.value = data;
-		} catch {
-			// ignore poll errors
-		}
-	}
+	let newCountTimer: ReturnType<typeof setInterval> | null = null;
+	let scrapePollTimer: ReturnType<typeof setInterval> | null = null;
+	let nowTimer: ReturnType<typeof setInterval> | null = null;
 
-	await refresh();
-	await peek();
+	// Auto-refresh the visible list whenever another source finishes, so new
+	// offers appear without waiting for the full run to end.
+	let lastCompletedCount = progressData.value?.completed.length ?? 0;
+	watch(
+		() => progressData.value?.completed.length ?? 0,
+		async (n) => {
+			if (n > lastCompletedCount && progressData.value?.running) {
+				await refresh();
+			}
+			lastCompletedCount = n;
+		},
+	);
 
-	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	// Notify when a foreign-tab-triggered run finishes with new offers.
+	watch(
+		() => progressData.value?.running,
+		async (isRunning, wasRunning) => {
+			if (wasRunning && !isRunning) {
+				const before = newCount.value;
+				const fresh = await peek();
+				await refresh();
+				if (fresh > before) {
+					notify(`${fresh - before} nowa oferta`, { body: "Sprawdź listę" });
+				}
+			}
+		},
+	);
 
 	onMounted(() => {
 		setTimeout(() => markVisited(), 4000);
-		pollTimer = setInterval(async () => {
+		newCountTimer = setInterval(async () => {
 			const before = newCount.value;
 			const fresh = await peek();
 			if (fresh > before) {
 				notify(`${fresh - before} nowa oferta`, { body: "Sprawdź listę" });
 			}
 		}, 60_000);
+		scrapePollTimer = setInterval(refreshStatus, 2_000);
+		nowTimer = setInterval(() => {
+			nowMs.value = Date.now();
+		}, 1_000);
 	});
 
 	onBeforeUnmount(() => {
-		if (pollTimer) clearInterval(pollTimer);
-		stopProgress();
+		if (newCountTimer) clearInterval(newCountTimer);
+		if (scrapePollTimer) clearInterval(scrapePollTimer);
+		if (nowTimer) clearInterval(nowTimer);
 	});
 
 	async function switchTab(tab: "active" | "applied" | "rejected") {
@@ -134,65 +149,14 @@
 	}
 
 	async function doScrape() {
-		scrapeMessage.value = "";
-		elapsedSeconds.value = 0;
-
-		if (!allSources.value.length) {
-			try {
-				allSources.value = await $fetch<SourceInfo[]>("/api/sources");
-			} catch {
-				// continue without source info
-			}
-		}
-
-		progressData.value = {
-			running: true,
-			startedAt: new Date().toISOString(),
-			total: allSources.value.length,
-			completed: [],
-		};
-
-		elapsedTimer = setInterval(() => {
-			elapsedSeconds.value++;
-		}, 1000);
-		progressTimer = setInterval(pollProgress, 2000);
-
 		try {
-			const r = (await trigger()) as {
-				status: string;
-				result?: {
-					perSource: Array<{
-						source: string;
-						newListings: number;
-						newGroups: number;
-						errors: string[];
-					}>;
-				};
-			};
-			stopProgress();
-
-			if (r.status === "already-running") {
-				progressData.value = null;
-				scrapeMessage.value = "Scrape już w toku — odśwież za chwilę.";
-			} else if (r.result) {
-				await pollProgress();
-				const fresh = r.result.perSource.reduce(
-					(a, s) => a + s.newListings,
-					0,
-				);
-				const errSources = r.result.perSource
-					.filter((s) => s.errors.length > 0)
-					.map((s) => s.source);
-				scrapeMessage.value = `Gotowe. Nowych ofert: ${fresh}${errSources.length ? ` · błędy: ${errSources.join(", ")}` : ""}`;
-				await refresh();
-				if (fresh > 0) {
-					notify(`${fresh} nowa oferta`, { body: "Sprawdź listę" });
-				}
+			const r = (await trigger()) as { freshCount?: number };
+			await refresh();
+			if (r?.freshCount && r.freshCount > 0) {
+				notify(`${r.freshCount} nowa oferta`, { body: "Sprawdź listę" });
 			}
-		} catch (e) {
-			stopProgress();
-			progressData.value = null;
-			scrapeMessage.value = `Błąd: ${(e as Error).message}`;
+		} catch {
+			// scrapeMessage set by trigger()
 		}
 	}
 </script>
@@ -207,18 +171,20 @@
 				</p>
 			</div>
 			<div class="actions">
-				<span v-if="newCount > 0" class="new-badge"
-					>+{{ newCount }} nowych</span
-				>
-				<ClientOnly>
-					<button
-						v-if="notifySupport && permission === 'default'"
-						class="btn-ghost"
-						@click="requestPermission"
+				<div class="actions-left">
+					<span v-if="newCount > 0" class="new-badge"
+						>+{{ newCount }} nowych</span
 					>
-						🔔 Włącz powiadomienia
-					</button>
-				</ClientOnly>
+					<ClientOnly>
+						<button
+							v-if="notifySupport && permission === 'default'"
+							class="btn-ghost"
+							@click="requestPermission"
+						>
+							🔔 Włącz powiadomienia
+						</button>
+					</ClientOnly>
+				</div>
 				<button class="btn-scrape" :disabled="running" @click="doScrape">
 					{{ running ? "⟳ Scrapuję..." : "⟳ Scrapuj teraz" }}
 				</button>
@@ -226,7 +192,7 @@
 		</header>
 
 		<div class="left-panels">
-		<div v-if="progressData" class="scrape-progress">
+		<div v-if="panelVisible && progressData" class="scrape-progress">
 			<div class="sp-head">
 				<span class="sp-title">{{
 					running ? "Scrapowanie w toku..." : "Scrapowanie zakończone"
@@ -239,7 +205,7 @@
 				<button
 					v-if="!running"
 					class="sp-close"
-					@click="progressData = null"
+					@click="dismiss"
 					title="Zamknij"
 				>×</button>
 			</div>
@@ -358,6 +324,17 @@
 	.actions {
 		display: flex;
 		gap: 0.5rem;
+		align-items: center;
+	}
+	/* Reserve a stable slot for the badge + notifications button so the
+	   scrape button doesn't shift when they hydrate/appear/disappear. */
+	.actions-left {
+		display: flex;
+		gap: 0.5rem;
+		align-items: center;
+		justify-content: flex-end;
+		/* Fits "🔔 Włącz powiadomienia" (~175px) + gap + "+N nowych" badge. */
+		min-width: 290px;
 	}
 	.btn-scrape {
 		padding: 0.6rem 1.2rem;
@@ -368,6 +345,7 @@
 		cursor: pointer;
 		font-weight: 600;
 		font-size: 0.95rem;
+		flex-shrink: 0;
 	}
 	.btn-scrape:disabled {
 		opacity: 0.6;

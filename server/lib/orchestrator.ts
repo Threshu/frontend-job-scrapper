@@ -26,7 +26,18 @@ interface RunState {
   total: number
 }
 
+interface LastRun {
+  startedAt: string
+  finishedAt: string
+  total: number
+  completed: OrchestratorRunResult['perSource']
+}
+
 let _running: RunState | null = null
+// Snapshot of the most recently completed run, kept so clients that were not
+// polling during the run (fresh tab / reload after finish) can still see the
+// summary panel. Cleared when a new run starts.
+let _last: LastRun | null = null
 
 export function isRunning(): boolean {
   return _running !== null
@@ -39,16 +50,29 @@ export function currentRun(): { startedAt: string } | null {
 export function scrapeProgress(): {
   running: boolean
   startedAt: string | null
+  finishedAt: string | null
   total: number
   completed: OrchestratorRunResult['perSource']
 } {
-  if (!_running) return { running: false, startedAt: null, total: 0, completed: [] }
-  return {
-    running: true,
-    startedAt: _running.startedAt,
-    total: _running.total,
-    completed: [..._running.completed],
+  if (_running) {
+    return {
+      running: true,
+      startedAt: _running.startedAt,
+      finishedAt: null,
+      total: _running.total,
+      completed: [..._running.completed],
+    }
   }
+  if (_last) {
+    return {
+      running: false,
+      startedAt: _last.startedAt,
+      finishedAt: _last.finishedAt,
+      total: _last.total,
+      completed: _last.completed,
+    }
+  }
+  return { running: false, startedAt: null, finishedAt: null, total: 0, completed: [] }
 }
 
 async function runOne(
@@ -90,6 +114,10 @@ export function runScrape(opts: { sources?: string[]; maxResultsPerSource?: numb
 
   const selected = SCRAPERS.filter((s) => !opts.sources || opts.sources.includes(s.source))
 
+  // A new run overrides the last-run snapshot immediately so clients don't
+  // briefly see the previous panel while this run is spinning up.
+  _last = null
+
   const state: RunState = { promise: null as unknown as Promise<OrchestratorRunResult>, startedAt, abort, completed: [], total: selected.length }
 
   const promise = (async () => {
@@ -118,6 +146,12 @@ export function runScrape(opts: { sources?: string[]; maxResultsPerSource?: numb
       perSource: [...normalResults, ...browserResults],
     }
   })().finally(async () => {
+    _last = {
+      startedAt: state.startedAt,
+      finishedAt: new Date().toISOString(),
+      total: state.total,
+      completed: state.completed,
+    }
     _running = null
     // Release Chromium between runs — keeping it alive pins ~100MB.
     if (isBrowserOpen()) await closeBrowser().catch(() => {})

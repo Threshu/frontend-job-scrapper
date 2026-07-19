@@ -124,7 +124,8 @@
       "Bash(python3 *)",
       "PowerShell(node -e \"try { require\\('playwright'\\) } catch\\(e\\) { console.log\\('playwright:', e.message.split\\('\\\\n'\\)[0]\\) }; try { require\\('playwright-core'\\) } catch\\(e\\) { console.log\\('playwright-core:', e.message.split\\('\\\\n'\\)[0]\\) }; try { require\\('playwright-extra'\\) } catch\\(e\\) { console.log\\('playwright-extra:', e.message.split\\('\\\\n'\\)[0]\\) }\")",
       "PowerShell(node -e \"console.log\\(require.resolve\\('playwright-extra'\\)\\); console.log\\(require.resolve\\('playwright-core'\\)\\)\")",
-      "PowerShell(node -e \"const {chromium} = require\\('playwright-extra'\\); const StealthPlugin = require\\('puppeteer-extra-plugin-stealth'\\); chromium.use\\(StealthPlugin\\(\\)\\); chromium.launch\\({headless:true}\\).then\\(b => { console.log\\('OK'\\); b.close\\(\\); }\\).catch\\(e => console.error\\('ERROR:', e.message.substring\\(0, 300\\)\\)\\)\" 2>&1 | Select-Object -First 20)"
+      "PowerShell(node -e \"const {chromium} = require\\('playwright-extra'\\); const StealthPlugin = require\\('puppeteer-extra-plugin-stealth'\\); chromium.use\\(StealthPlugin\\(\\)\\); chromium.launch\\({headless:true}\\).then\\(b => { console.log\\('OK'\\); b.close\\(\\); }\\).catch\\(e => console.error\\('ERROR:', e.message.substring\\(0, 300\\)\\)\\)\" 2>&1 | Select-Object -First 20)",
+      "Bash(grep -v \".map$\")"
     ]
   }
 }

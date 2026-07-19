@@ -3,6 +3,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience,
 } from './types'
+import { fmtErr } from './types'
 
 // Pracuj.pl exposes a JSON API at massachusetts.pracuj.pl that powers their
 // SPA — no Playwright needed. The endpoint returns the same groupedOffers
@@ -157,7 +158,7 @@ export const pracujScraper: JobScraper = {
           if (!res.ok) throw new Error(`HTTP ${res.status}`)
           data = await res.json() as PracujApiResponse
         } catch (e) {
-          errors.push(`keyword "${keyword}" offset=${offset}: ${(e as Error).message}`)
+          errors.push(`keyword "${keyword}" offset=${offset}: ${fmtErr(e)}`)
           break
         }
 

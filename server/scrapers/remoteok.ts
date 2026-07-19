@@ -1,6 +1,7 @@
 import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
 } from './types'
+import { fmtErr } from './types'
 
 // Remote OK exposes a public JSON feed at /api. The response is an array
 // where the first element is the legal/usage notice and the rest are jobs.
@@ -71,7 +72,7 @@ export const remoteokScraper: JobScraper = {
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       payload = (await res.json()) as RoJob[]
     } catch (e) {
-      errors.push((e as Error).message)
+      errors.push(fmtErr(e))
       return { source: this.source, jobs, errors }
     }
 

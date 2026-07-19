@@ -2,6 +2,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   Experience, ContractType, SalaryPeriod,
 } from './types'
+import { fmtErr } from './types'
 
 // Rocketjobs.pl exposes a JSON API at /api/candidate-api/offers but covers
 // all industries. We filter down to IT/frontend by category key, title, or
@@ -134,7 +135,7 @@ export const rocketjobsScraper: JobScraper = {
       try {
         page = await fetchPage(from, ctx.signal)
       } catch (e) {
-        errors.push((e as Error).message)
+        errors.push(fmtErr(e))
         break
       }
 

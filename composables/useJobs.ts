@@ -1,5 +1,28 @@
 import type { GroupDto } from "~~/server/api/groups/index.get";
 
+export interface SourceInfo {
+	source: string;
+	displayName: string;
+	needsBrowser: boolean;
+}
+
+export interface CompletedSource {
+	source: string;
+	fetched: number;
+	newListings: number;
+	newGroups: number;
+	errors: string[];
+	durationMs: number;
+}
+
+export interface ScrapeProgressData {
+	running: boolean;
+	startedAt: string | null;
+	finishedAt: string | null;
+	total: number;
+	completed: CompletedSource[];
+}
+
 export interface JobFilters {
 	status: string;
 	hasVue: boolean;
@@ -185,24 +208,111 @@ export function useJobs() {
 }
 
 export function useScrape() {
-	const running = useState<boolean>("scrapeRunning", () => false);
-	const lastResult = useState<unknown>("scrapeLastResult", () => null);
+	const progressData = useState<ScrapeProgressData | null>(
+		"scrapeProgress",
+		() => null,
+	);
+	const allSources = useState<SourceInfo[]>("scrapeSources", () => []);
+	const scrapeMessage = useState<string>("scrapeMessage", () => "");
+	// Tracks which finished run (by startedAt) the user has dismissed the panel
+	// for. In-memory only — a reload will show the last run again, which is
+	// usually helpful ("here's what happened while the tab was closed").
+	const dismissedRunId = useState<string | null>(
+		"scrapeDismissedRun",
+		() => null,
+	);
 
-	async function trigger(sources?: string[]) {
-		running.value = true;
+	const running = computed(() => progressData.value?.running ?? false);
+
+	const panelVisible = computed(() => {
+		const p = progressData.value;
+		if (!p) return false;
+		if (p.running) return true;
+		return dismissedRunId.value !== p.startedAt;
+	});
+
+	async function refreshStatus() {
 		try {
-			const r = await $fetch("/api/scrape", {
-				method: "POST",
-				body: { sources },
-			});
-			lastResult.value = r;
-			return r;
-		} finally {
-			running.value = false;
+			const data = await $fetch<ScrapeProgressData>("/api/scrape/status");
+			if (data.running || (data.completed?.length ?? 0) > 0 || data.startedAt) {
+				progressData.value = data;
+			} else if (progressData.value && !progressData.value.running) {
+				// Server dropped the last-run snapshot — clear any stale local copy.
+				progressData.value = null;
+			}
+		} catch {
+			// swallow — polling errors shouldn't disrupt the UI
 		}
 	}
 
-	return { running, lastResult, trigger };
+	async function ensureSources() {
+		if (allSources.value.length) return;
+		try {
+			allSources.value = await $fetch<SourceInfo[]>("/api/sources");
+		} catch {
+			// continue without source info
+		}
+	}
+
+	function dismiss() {
+		if (progressData.value?.startedAt) {
+			dismissedRunId.value = progressData.value.startedAt;
+		}
+	}
+
+	async function trigger(sources?: string[]) {
+		scrapeMessage.value = "";
+		await ensureSources();
+		// Optimistic panel — visible before the POST resolves.
+		if (!progressData.value?.running) {
+			progressData.value = {
+				running: true,
+				startedAt: new Date().toISOString(),
+				finishedAt: null,
+				total: sources?.length || allSources.value.length,
+				completed: [],
+			};
+		}
+		try {
+			const r = await $fetch<{
+				status: string;
+				result?: { perSource: CompletedSource[] };
+			}>("/api/scrape", { method: "POST", body: { sources } });
+
+			// Always resync with server truth after the POST resolves.
+			await refreshStatus();
+
+			if (r.status === "ok" && r.result) {
+				const fresh = r.result.perSource.reduce(
+					(a, s) => a + s.newListings,
+					0,
+				);
+				const errSources = r.result.perSource
+					.filter((s) => s.errors.length > 0)
+					.map((s) => s.source);
+				scrapeMessage.value = `Gotowe. Nowych ofert: ${fresh}${
+					errSources.length ? ` · błędy: ${errSources.join(", ")}` : ""
+				}`;
+				return { ...r, freshCount: fresh };
+			}
+			return r;
+		} catch (e) {
+			scrapeMessage.value = `Błąd: ${(e as Error).message}`;
+			throw e;
+		}
+	}
+
+	return {
+		running,
+		progressData,
+		panelVisible,
+		allSources,
+		scrapeMessage,
+		trigger,
+		dismiss,
+		refreshStatus,
+		ensureSources,
+	};
 }
 
 export function useNewCount() {

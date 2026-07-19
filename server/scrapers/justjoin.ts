@@ -7,6 +7,7 @@ import type {
 	ContractType,
 	SalaryPeriod,
 } from "./types";
+import { fmtErr } from "./types";
 
 // JJIT shut down their public /api/offers in 2023. The SPA now calls the
 // internal /api/candidate-api/* gateway, which is still reachable without
@@ -190,7 +191,7 @@ export const justjoinScraper: JobScraper = {
 			try {
 				page = await fetchPage(from, ctx.signal);
 			} catch (e) {
-				errors.push(String((e as Error).message));
+				errors.push(fmtErr(e));
 				break;
 			}
 
@@ -208,7 +209,7 @@ export const justjoinScraper: JobScraper = {
 					if (ctx.maxResults && jobs.length >= ctx.maxResults)
 						return { source: this.source, jobs, errors };
 				} catch (e) {
-					errors.push(`detail ${offer.slug}: ${(e as Error).message}`);
+					errors.push(`detail ${offer.slug}: ${fmtErr(e)}`);
 				}
 				await sleep(REQUEST_DELAY_MS);
 			}

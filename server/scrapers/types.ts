@@ -50,3 +50,18 @@ export interface JobScraper {
   }
   scrape(ctx: ScrapeContext): Promise<ScrapeResult>
 }
+
+// Formats a caught error including the cause chain so "fetch failed" entries
+// in scrape_runs.error_message contain the real underlying error code/message.
+export function fmtErr(e: unknown): string {
+  const parts: string[] = []
+  let cur: unknown = e
+  while (cur) {
+    const err = cur as Error & { code?: string; cause?: unknown }
+    const part = [err.message, err.code ? `(${err.code})` : ''].filter(Boolean).join(' ')
+    if (part) parts.push(part)
+    cur = err.cause
+    if (parts.length > 5) break // guard against circular causes
+  }
+  return parts.join(' → ') || String(e)
+}

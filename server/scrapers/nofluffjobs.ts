@@ -2,6 +2,7 @@ import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
   ContractType, Experience, SalaryPeriod,
 } from './types'
+import { fmtErr } from './types'
 
 // NoFluffJobs has a documented-ish search API:
 //   POST /api/search/posting?salaryCurrency=PLN&salaryPeriod=month
@@ -213,7 +214,7 @@ export const nofluffjobsScraper: JobScraper = {
       try {
         postings = await search(q.criteria, 200, ctx.signal)
       } catch (e) {
-        errors.push(`search[${q.label}]: ${(e as Error).message}`)
+        errors.push(`search[${q.label}]: ${fmtErr(e)}`)
         continue
       }
 
@@ -226,7 +227,7 @@ export const nofluffjobsScraper: JobScraper = {
           if (detail.status?.active === false) continue
           jobs.push(detailToRaw(detail))
         } catch (e) {
-          errors.push(`detail ${p.url}: ${(e as Error).message}`)
+          errors.push(`detail ${p.url}: ${fmtErr(e)}`)
           // Fall back to the search-result payload so we still ingest something.
           jobs.push(listingToRaw(p))
         }

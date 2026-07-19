@@ -6,6 +6,7 @@ import type {
 	ContractType,
 	Experience,
 } from "./types";
+import { fmtErr } from "./types";
 
 const SLUG_PAGES = [
 	"https://bulldogjob.com/companies/jobs/s/skills,Vue.js",
@@ -146,7 +147,7 @@ export const bulldogjobScraper: JobScraper = {
 					}
 				}
 			} catch (e) {
-				errors.push(`list ${url}: ${(e as Error).message}`);
+				errors.push(`list ${url}: ${fmtErr(e)}`);
 			}
 			await sleep(LIST_DELAY_MS);
 		}

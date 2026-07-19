@@ -1,6 +1,7 @@
 import type {
   JobScraper, RawJob, ScrapeContext, ScrapeResult,
 } from './types'
+import { fmtErr } from './types'
 
 // Remotive exposes a documented public JSON API — no auth required.
 // Endpoint: GET /api/remote-jobs?category=software-dev&search=<term>
@@ -106,7 +107,7 @@ export const remotiveScraper: JobScraper = {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         data = await res.json() as RemotiveResponse
       } catch (e) {
-        errors.push(`search[${term}]: ${(e as Error).message}`)
+        errors.push(`search[${term}]: ${fmtErr(e)}`)
         await sleep(REQUEST_DELAY_MS)
         continue
       }
