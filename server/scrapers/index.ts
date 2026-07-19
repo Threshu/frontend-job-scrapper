@@ -9,12 +9,14 @@ import { pracujScraper } from './pracuj'
 import { theProtocolScraper } from './theprotocol'
 import { indeedScraper } from './indeed'
 import { remotiveScraper } from './remotive'
+import { wwrScraper } from './wwr'
+import { javascriptJobsScraper } from './javascriptjobs'
 
 // Registry of available scrapers. Add a new portal by importing its scraper
 // here. The orchestrator iterates this list and isolates failures per source.
 //
 // Tier 1 (plain JSON APIs):    justjoin, nofluffjobs, rocketjobs, remoteok, remotive, pracuj
-// Tier 2 (HTML w/o browser):   bulldogjob, linkedin
+// Tier 2 (HTML/RSS w/o browser): bulldogjob, linkedin, wwr, jsjobs
 // Tier 3 (Playwright):         theprotocol, indeed
 //
 // Portals that were tried and abandoned (removed from repo — check git log
@@ -31,4 +33,6 @@ export const SCRAPERS: JobScraper[] = [
   pracujScraper,
   theProtocolScraper,
   indeedScraper,
+  wwrScraper,
+  javascriptJobsScraper,
 ]
