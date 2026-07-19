@@ -37,6 +37,13 @@ CREATE INDEX IF NOT EXISTS idx_listings_group       ON job_listings(group_id);
 CREATE INDEX IF NOT EXISTS idx_listings_source      ON job_listings(source);
 CREATE INDEX IF NOT EXISTS idx_listings_has_vue     ON job_listings(has_vue);
 CREATE INDEX IF NOT EXISTS idx_listings_first_seen  ON job_listings(first_seen_at DESC);
+-- Stale filter uses last_seen_at / posted_at in datetime() comparisons on nearly
+-- every list query — without these indexes the query full-scans job_listings.
+CREATE INDEX IF NOT EXISTS idx_listings_last_seen   ON job_listings(last_seen_at DESC);
+CREATE INDEX IF NOT EXISTS idx_listings_posted      ON job_listings(posted_at);
+-- Composite for the EXISTS subquery that joins group_id with last_seen_at
+-- (most selective when the group filter narrows first).
+CREATE INDEX IF NOT EXISTS idx_listings_group_seen  ON job_listings(group_id, last_seen_at);
 -- idx_listings_vue_releva and idx_groups_stem are created in migrations.ts after
 -- the ALTER TABLE that adds those columns on pre-existing databases.
 
@@ -61,6 +68,9 @@ CREATE TABLE IF NOT EXISTS job_groups (
 CREATE INDEX IF NOT EXISTS idx_groups_fingerprint ON job_groups(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_groups_status      ON job_groups(status);
 CREATE INDEX IF NOT EXISTS idx_groups_created     ON job_groups(created_at DESC);
+-- Main list ordering is ORDER BY g.updated_at DESC LIMIT ... — the sort was
+-- previously a filesort over the whole table.
+CREATE INDEX IF NOT EXISTS idx_groups_updated     ON job_groups(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS scrape_runs (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,

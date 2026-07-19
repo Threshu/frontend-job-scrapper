@@ -110,6 +110,26 @@ export function runMigrations(db: Database): void {
       `INSERT OR REPLACE INTO app_state (key, value) VALUES ('dedup_remerged_v1', datetime('now'))`,
     ).run()
   }
+
+  // 5. One-time purge of stored description text. Framework flags and
+  //    vue_relevance were already computed and stored at insert time, so the
+  //    raw description is dead weight — was ~40MB in a ~80MB DB. VACUUM
+  //    reclaims the freed pages back to the filesystem.
+  const descGuard = db
+    .prepare(`SELECT value FROM app_state WHERE key = 'descriptions_purged_v1'`)
+    .get() as { value: string } | undefined
+  if (!descGuard) {
+    const info = db
+      .prepare(`UPDATE job_listings SET description = '' WHERE description != ''`)
+      .run()
+    db.prepare(
+      `INSERT OR REPLACE INTO app_state (key, value) VALUES ('descriptions_purged_v1', datetime('now'))`,
+    ).run()
+    // VACUUM must run outside any transaction. runMigrations is called from
+    // useDb() which does not wrap in a transaction, so this is safe.
+    db.exec(`VACUUM`)
+    console.log(`[migrations] cleared descriptions in ${info.changes} listing(s) + VACUUM`)
+  }
 }
 
 // Status priority: a user-progressed status beats 'new'. When we collapse multiple

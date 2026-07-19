@@ -129,6 +129,10 @@ export const pracujScraper: JobScraper = {
   source: 'pracuj',
   displayName: 'Pracuj.pl',
   capabilities: { needsBrowser: false, supportsKeywordFilter: true },
+  // Fetches over the massachusetts.pracuj.pl JSON API — no browser needed but
+  // still relatively slow (multiple keyword queries, each paginated). 45 min
+  // is a reasonable middle ground.
+  cronIntervalMinutes: 45,
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []

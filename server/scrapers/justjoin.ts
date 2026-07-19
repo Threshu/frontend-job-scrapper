@@ -8,6 +8,7 @@ import type {
 	SalaryPeriod,
 } from "./types";
 import { fmtErr } from "./types";
+import { pMap } from "../lib/concurrency";
 
 // JJIT shut down their public /api/offers in 2023. The SPA now calls the
 // internal /api/candidate-api/* gateway, which is still reachable without
@@ -167,6 +168,7 @@ async function fetchDetail(
 // listings, well past the volume of fresh frontend jobs in Poland on a given day.
 const MAX_PAGES = 200;
 const REQUEST_DELAY_MS = 200;
+const DETAIL_CONCURRENCY = 4;
 
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
@@ -179,9 +181,12 @@ export const justjoinScraper: JobScraper = {
 
 	async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
 		const errors: string[] = [];
-		const jobs: RawJob[] = [];
 		const seen = new Set<string>();
+		const queue: JjitListOffer[] = [];
 
+		// Phase 1: paginate the list endpoint and collect frontend candidates.
+		// List pagination stays serial so we don't hammer the cursor endpoint;
+		// detail fetches are parallelized below.
 		let from = 0;
 		let totalItems = Infinity;
 		let pages = 0;
@@ -202,23 +207,31 @@ export const justjoinScraper: JobScraper = {
 				if (seen.has(offer.slug)) continue;
 				seen.add(offer.slug);
 				if (!looksFrontend(offer)) continue;
-				try {
-					const detail = await fetchDetail(offer.slug, ctx.signal);
-					if (detail.isActive === false) continue;
-					jobs.push(buildRawJob(detail));
-					if (ctx.maxResults && jobs.length >= ctx.maxResults)
-						return { source: this.source, jobs, errors };
-				} catch (e) {
-					errors.push(`detail ${offer.slug}: ${fmtErr(e)}`);
-				}
-				await sleep(REQUEST_DELAY_MS);
+				queue.push(offer);
+				if (ctx.maxResults && queue.length >= ctx.maxResults) break;
 			}
+			if (ctx.maxResults && queue.length >= ctx.maxResults) break;
 
 			from += page.data.length;
 			pages++;
 			await sleep(REQUEST_DELAY_MS);
 		}
 
+		// Phase 2: fetch details concurrently.
+		const results = await pMap(queue, DETAIL_CONCURRENCY, async (offer) => {
+			try {
+				const detail = await fetchDetail(offer.slug, ctx.signal);
+				if (detail.isActive === false) return null;
+				return buildRawJob(detail);
+			} catch (e) {
+				errors.push(`detail ${offer.slug}: ${fmtErr(e)}`);
+				return null;
+			} finally {
+				await sleep(REQUEST_DELAY_MS);
+			}
+		});
+
+		const jobs = results.filter((j): j is RawJob => j !== null);
 		return { source: this.source, jobs, errors };
 	},
 };

@@ -147,8 +147,15 @@ async function ensureContext(): Promise<BrowserContext> {
 }
 
 // Fetches a page and returns its HTML after the network has gone idle.
-// Used by Cloudflare-protected portals (pracuj, theprotocol) and JS-rendered
-// ones (solid.jobs, 4programmers, indeed).
+// Used by Cloudflare-protected portals (theprotocol) and JS-rendered ones (indeed).
+//
+// Note on networkidle timeouts: Nuxt/Next SPAs rarely reach true networkidle
+// within any reasonable window because they keep firing analytics / prefetch
+// beacons. We keep it short (5s) and let the caller supply waitForSelector
+// when they know exactly what to wait for — that path is both faster and more
+// reliable when it fires successfully.
+const NETWORK_IDLE_TIMEOUT_MS = 5_000
+
 export async function fetchPageHtml(url: string, opts: { waitForSelector?: string; timeoutMs?: number } = {}): Promise<string> {
   const context = await ensureContext()
   const page = await context.newPage()
@@ -157,7 +164,7 @@ export async function fetchPageHtml(url: string, opts: { waitForSelector?: strin
     if (opts.waitForSelector) {
       await page.waitForSelector(opts.waitForSelector, { timeout: opts.timeoutMs ?? 15_000 }).catch(() => {})
     } else {
-      await page.waitForLoadState('networkidle', { timeout: opts.timeoutMs ?? 15_000 }).catch(() => {})
+      await page.waitForLoadState('networkidle', { timeout: NETWORK_IDLE_TIMEOUT_MS }).catch(() => {})
     }
     return page.content()
   } finally {
@@ -182,7 +189,7 @@ export async function fetchPagesHtmlSequential(
         if (opts.waitForSelector) {
           await page.waitForSelector(opts.waitForSelector, { timeout: 15_000 }).catch(() => {})
         } else {
-          await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
+          await page.waitForLoadState('networkidle', { timeout: NETWORK_IDLE_TIMEOUT_MS }).catch(() => {})
         }
         results.push(await page.content())
       } catch {

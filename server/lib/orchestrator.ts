@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 import { useDb } from '../db'
-import { expireListings, recordScrapeRun, upsertListing } from '../db/repository'
+import { expireListings, pruneScrapeRuns, recordScrapeRun, upsertListing } from '../db/repository'
 import { SCRAPERS } from '../scrapers'
 import type { JobScraper, ScrapeContext } from '../scrapers/types'
 import { closeBrowser, isBrowserOpen } from './browser'
@@ -153,6 +153,8 @@ export function runScrape(opts: { sources?: string[]; maxResultsPerSource?: numb
       completed: state.completed,
     }
     _running = null
+    // Bounded scrape_runs history — cheap DELETE, only runs once per full scrape.
+    try { pruneScrapeRuns(30, db) } catch {}
     // Release Chromium between runs — keeping it alive pins ~100MB.
     if (isBrowserOpen()) await closeBrowser().catch(() => {})
   })

@@ -85,14 +85,27 @@
 		return rem > 0 ? `${m}m ${rem}s` : `${m}m`;
 	}
 
-	// SSR-safe initial load: fetch groups, new count, scrape status, and source
-	// list in parallel so the button state (disabled if server is scraping) is
-	// correct on first paint, without stacking sequential awaits.
-	await Promise.all([refresh(), peek(), refreshStatus(), ensureSources()]);
+	// Initial load runs on SSR only — the resulting useState values ship down
+	// in Nuxt's payload and are already populated when the client hydrates.
+	// Running these on the client too would double every request.
+	if (import.meta.server) {
+		await Promise.all([refresh(), peek(), refreshStatus(), ensureSources()]);
+	}
 
 	let newCountTimer: ReturnType<typeof setInterval> | null = null;
-	let scrapePollTimer: ReturnType<typeof setInterval> | null = null;
+	let scrapePollHandle: ReturnType<typeof setTimeout> | null = null;
 	let nowTimer: ReturnType<typeof setInterval> | null = null;
+
+	// Adaptive scrape-status polling: 2s while running (need snappy live
+	// updates), 10s when idle (only cares about detecting new runs from other
+	// tabs / cron). Uses recursive setTimeout so the delay can change per tick.
+	const SCRAPE_POLL_ACTIVE_MS = 2_000;
+	const SCRAPE_POLL_IDLE_MS = 10_000;
+	async function scheduleScrapePoll() {
+		await refreshStatus();
+		const delay = running.value ? SCRAPE_POLL_ACTIVE_MS : SCRAPE_POLL_IDLE_MS;
+		scrapePollHandle = setTimeout(scheduleScrapePoll, delay);
+	}
 
 	// Auto-refresh the visible list whenever another source finishes, so new
 	// offers appear without waiting for the full run to end.
@@ -131,15 +144,25 @@
 				notify(`${fresh - before} nowa oferta`, { body: "Sprawdź listę" });
 			}
 		}, 60_000);
-		scrapePollTimer = setInterval(refreshStatus, 2_000);
+		scheduleScrapePoll();
 		nowTimer = setInterval(() => {
 			nowMs.value = Date.now();
 		}, 1_000);
 	});
 
+	// If a run starts (via trigger() or a foreign-tab poll landing on running=true),
+	// pull the next status check forward so the panel updates within 2s rather
+	// than waiting up to the full idle interval.
+	watch(running, (isRunning) => {
+		if (isRunning && scrapePollHandle) {
+			clearTimeout(scrapePollHandle);
+			scheduleScrapePoll();
+		}
+	});
+
 	onBeforeUnmount(() => {
 		if (newCountTimer) clearInterval(newCountTimer);
-		if (scrapePollTimer) clearInterval(scrapePollTimer);
+		if (scrapePollHandle) clearTimeout(scrapePollHandle);
 		if (nowTimer) clearInterval(nowTimer);
 	});
 

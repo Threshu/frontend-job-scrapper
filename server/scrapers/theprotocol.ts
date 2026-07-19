@@ -181,6 +181,8 @@ export const theProtocolScraper: JobScraper = {
   source: 'theprotocol',
   displayName: 'theProtocol.it',
   capabilities: { needsBrowser: true, supportsKeywordFilter: true },
+  // Cloudflare challenge + Playwright — expensive per run.
+  cronIntervalMinutes: 60,
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []

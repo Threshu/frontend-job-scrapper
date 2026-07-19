@@ -16,8 +16,15 @@ export function useDb(): Database.Database {
 
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
+  // synchronous = NORMAL is safe together with WAL (no risk of DB corruption
+  // on crash — worst case is the last committed transaction is rolled back)
+  // and is 2-3× faster on write-heavy paths like the upsert loop.
+  db.pragma('synchronous = NORMAL')
   db.pragma('foreign_keys = ON')
   db.pragma('busy_timeout = 10000')
+  // Bigger page cache — a full scrape touches indexes across most of the DB;
+  // 20MB keeps everything hot without meaningfully increasing memory.
+  db.pragma('cache_size = -20000')
   db.exec(SCHEMA_SQL)
   runMigrations(db)
 

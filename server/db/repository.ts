@@ -136,18 +136,13 @@ function createGroup(db: Database, company: string, title: string): GroupRow {
 // Resolves (or creates) the group for cross-source deduplication.
 export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult {
   const now = new Date().toISOString()
-  const flags = detectFrameworks({
-    title: job.title,
-    description: job.description,
-    skills: job.skills,
-  })
-  const relevance = flags.hasVue
-    ? classifyVueRelevance(job.title, job.description, job.skills)
-    : 'none'
 
+  // Cheap existence check first — ~80% of scraped listings on a repeat run are
+  // duplicates, and detectFrameworks / classifyVueRelevance run heavy regex on
+  // the full description. Skipping them here saves noticeable time per scrape.
   const existing = db
-    .prepare<[string, string], ListingRow>(
-      'SELECT * FROM job_listings WHERE source = ? AND source_id = ? LIMIT 1',
+    .prepare<[string, string], Pick<ListingRow, 'id' | 'group_id'>>(
+      'SELECT id, group_id FROM job_listings WHERE source = ? AND source_id = ? LIMIT 1',
     )
     .get(job.source, job.sourceId)
 
@@ -161,6 +156,15 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
     }
   }
 
+  const flags = detectFrameworks({
+    title: job.title,
+    description: job.description,
+    skills: job.skills,
+  })
+  const relevance = flags.hasVue
+    ? classifyVueRelevance(job.title, job.description, job.skills)
+    : 'none'
+
   // Resolve group: exact fingerprint → fuzzy → new.
   const fingerprint = fingerprintFor(job.company, job.title)
   let group = findGroupByFingerprint(db, fingerprint)
@@ -173,6 +177,11 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
     isNewGroup = true
   }
 
+  // description is intentionally NOT persisted — it's only used above to feed
+  // the framework detector / relevance classifier, whose outputs land in the
+  // `has_*` and `vue_relevance` columns. Storing raw descriptions was ~40MB of
+  // dead weight in a 79MB DB. If a future feature needs to re-classify from
+  // raw text, put description back here AND in the SELECT list of the list API.
   const info = db
     .prepare(
       `INSERT INTO job_listings (
@@ -197,7 +206,7 @@ export function upsertListing(job: RawJob, db: Database = useDb()): UpsertResult
       job.salaryPeriod ?? null,
       job.contractType ?? null,
       job.experience ?? null,
-      job.description,
+      '',
       JSON.stringify(job.skills),
       flags.hasVue ? 1 : 0,
       flags.hasReact ? 1 : 0,
@@ -241,4 +250,13 @@ export function recordScrapeRun(
     `INSERT INTO scrape_runs (source, started_at, finished_at, status, fetched_count, new_count, error_message)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(source, now, status === 'running' ? null : now, status, fetched, newCount, errorMessage)
+}
+
+// scrape_runs grows ~480 rows/day (10 sources × 48 cron ticks). Called from
+// the orchestrator at the end of each run to keep the table bounded.
+export function pruneScrapeRuns(retainDays = 30, db: Database = useDb()): number {
+  const info = db
+    .prepare(`DELETE FROM scrape_runs WHERE started_at < datetime('now', '-' || ? || ' days')`)
+    .run(retainDays)
+  return info.changes
 }

@@ -3,6 +3,7 @@ import type {
   ContractType, Experience, SalaryPeriod,
 } from './types'
 import { fmtErr } from './types'
+import { pMap } from '../lib/concurrency'
 
 // NoFluffJobs has a documented-ish search API:
 //   POST /api/search/posting?salaryCurrency=PLN&salaryPeriod=month
@@ -159,8 +160,13 @@ function listingToRaw(p: NfjPosting): RawJob {
   }
 }
 
+// Per-worker delay after each request. With DETAIL_CONCURRENCY workers running
+// in parallel we get roughly DETAIL_CONCURRENCY / (DELAY/1000) req/sec — a few
+// times faster than the previous serial 1 req / ~500ms without triggering
+// NFJ's rate limiter (retry logic below still catches the occasional 502).
 const REQUEST_DELAY_MS = 350
 const REQUEST_JITTER_MS = 200
+const DETAIL_CONCURRENCY = 3
 // NFJ's detail endpoint 502s under fast sequential load; brief backoff clears it.
 const DETAIL_RETRY_DELAYS_MS = [800, 2000, 4500]
 
@@ -206,9 +212,11 @@ export const nofluffjobsScraper: JobScraper = {
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []
-    const jobs: RawJob[] = []
     const seen = new Set<string>()
+    const queue: NfjPosting[] = []
 
+    // Phase 1: run each search query serially and collect a deduped queue of
+    // postings to fetch details for.
     for (const q of SEARCH_QUERIES) {
       let postings: NfjPosting[]
       try {
@@ -217,28 +225,31 @@ export const nofluffjobsScraper: JobScraper = {
         errors.push(`search[${q.label}]: ${fmtErr(e)}`)
         continue
       }
-
       for (const p of postings) {
         if (seen.has(p.url)) continue
         seen.add(p.url)
-
-        try {
-          const detail = await fetchDetail(p.url, ctx.signal)
-          if (detail.status?.active === false) continue
-          jobs.push(detailToRaw(detail))
-        } catch (e) {
-          errors.push(`detail ${p.url}: ${fmtErr(e)}`)
-          // Fall back to the search-result payload so we still ingest something.
-          jobs.push(listingToRaw(p))
-        }
-
-        if (ctx.maxResults && jobs.length >= ctx.maxResults) {
-          return { source: this.source, jobs, errors }
-        }
-        await sleep(nextDelay())
+        queue.push(p)
+        if (ctx.maxResults && queue.length >= ctx.maxResults) break
       }
+      if (ctx.maxResults && queue.length >= ctx.maxResults) break
     }
 
+    // Phase 2: fetch details concurrently. Falls back to the search-result
+    // payload if the detail call fails so we still ingest something.
+    const results = await pMap(queue, DETAIL_CONCURRENCY, async (p) => {
+      try {
+        const detail = await fetchDetail(p.url, ctx.signal)
+        if (detail.status?.active === false) return null
+        return detailToRaw(detail)
+      } catch (e) {
+        errors.push(`detail ${p.url}: ${fmtErr(e)}`)
+        return listingToRaw(p)
+      } finally {
+        await sleep(nextDelay())
+      }
+    })
+
+    const jobs = results.filter((j): j is RawJob => j !== null)
     return { source: this.source, jobs, errors }
   },
 }

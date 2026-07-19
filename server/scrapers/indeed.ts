@@ -80,6 +80,9 @@ export const indeedScraper: JobScraper = {
   source: 'indeed',
   displayName: 'Indeed.pl',
   capabilities: { needsBrowser: true, supportsKeywordFilter: true },
+  // Cloudflare + Playwright, plus Indeed's list rarely refreshes faster than
+  // hourly for our niche — no need to run more often.
+  cronIntervalMinutes: 60,
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []

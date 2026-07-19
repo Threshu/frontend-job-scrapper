@@ -1,6 +1,7 @@
 import { useDb } from '../../db'
 import type { GroupRow, ListingRow } from '../../db/repository'
 import { vueInTitle as hasVueInTitle } from '../../lib/vueDetector'
+import { isNoiseTitle } from '../../lib/noiseFilter'
 
 export interface GroupDto {
   id: number
@@ -36,7 +37,8 @@ export interface GroupDto {
     salaryPeriod: string | null
     contractType: string | null
     experience: string | null
-    description: string
+    // description omitted — not rendered anywhere in the UI. Ship a dedicated
+    // endpoint if that changes (see server/api/listings/[id]/description.get.ts).
     skills: string[]
     hasVue: boolean
     hasReact: boolean
@@ -49,12 +51,15 @@ export interface GroupDto {
   }>
 }
 
-interface ListingRowWithStale extends ListingRow {
+// Everything on ListingRow except description — we deliberately skip fetching
+// it from SQLite for the list endpoint since it's the largest column and never
+// rendered in the card.
+type ListingRowSlim = Omit<ListingRow, 'description'> & {
   is_stale_unseen: number
   is_stale_aged: number
 }
 
-function mapListing(r: ListingRowWithStale): GroupDto['listings'][number] {
+function mapListing(r: ListingRowSlim): GroupDto['listings'][number] {
   const stale = r.is_stale_unseen === 1 || r.is_stale_aged === 1
   const reason: 'unseen' | 'aged' | null = r.is_stale_unseen === 1 ? 'unseen' : r.is_stale_aged === 1 ? 'aged' : null
   return {
@@ -72,7 +77,6 @@ function mapListing(r: ListingRowWithStale): GroupDto['listings'][number] {
     salaryPeriod: r.salary_period,
     contractType: r.contract_type,
     experience: r.experience,
-    description: r.description,
     skills: JSON.parse(r.skills_json) as string[],
     hasVue: !!r.has_vue,
     hasReact: !!r.has_react,
@@ -144,47 +148,8 @@ export default defineEventHandler((event) => {
     )`)
     params.push(...relevanceAllowed)
   }
-  if (hideNoise) {
-    // Oferta jest OK jeśli Vue jest w tytule ALBO tytuł nie pasuje do szablonów szumu.
-    // Szablony pokrywają: języki backendowe jako główny tech, role niedev, React/Angular-primary.
-    const noisePatterns = [
-      // Python jako główny język — każdy tytuł z "python" bez Vue w tytule
-      '%python%',
-      // Java (ostrożnie — nie "javascript")
-      '%java developer%', '%java engineer%', '%fullstack java%',
-      // .NET/C# jako główny
-      '%.net developer%', '%.net engineer%', '%.net core%', '%.net full%', '%(.net%', '% .net%',
-      // React jako główny frontend (bez Vue w tytule)
-      '%react developer%', '%react engineer%', '%react native%',
-      // Inne języki backendowe
-      '%golang%', '%kotlin developer%', '%kotlin engineer%', '%c++%', '%ruby%',
-      // Role niedev
-      '%qa engineer%', '%quality engineer%', '%quality assurance%',
-      '%tester manualny%', '%engineer in test%',
-      '%vice president%', '%vp,%', '%vp %',
-      '%head of %', '%chief %',
-      '%director%', '%directeur%', '%ingénierie%',
-      '%telco%', '%telecom%',
-      '% manager%', '% analyst%', '% designer%',
-      '%support specialist%', '%support engineer%',
-      '%product owner%', '%cloud consultant%', '%devops%',
-      // Lead/architect role titles (vue_in_title=1 chroni "Lead Vue Developer" itp.)
-      '%lead software engineer%', '%lead full%', '%tech lead%', '%team lead%',
-      '%solution architect%', '%software architect%', '%architecte%',
-      // PHP jako główny (PHP+Vue z Vue w tytule jest chronione przez warunek vue_in_title)
-      '%php developer%', '%php engineer%',
-      // Platformy e-commerce (Shopify/Magento/WP) — nie Vue-frontend
-      '%shopify%', '%magento%', '%wordpress developer%', '%wordpress engineer%',
-      // Ogólne role e-commerce (Technical Lead, Architect itp.)
-      '%ecommerce%',
-    ]
-    const likeClauses = noisePatterns.map(() => `LOWER(g.canonical_title) LIKE ?`).join(' OR ')
-    where.push(`(
-      LOWER(g.canonical_title) LIKE '%vue%'
-      OR NOT (${likeClauses})
-    )`)
-    params.push(...noisePatterns)
-  }
+  // hideNoise moved to post-fetch JS filter (see below) — SQL LIKE '%pattern%'
+  // on 30+ patterns forced full scans on canonical_title on every list load.
   // Stale filter: exclude groups whose ALL listings are stale.
   // "stale" = last_seen_at older than threshold OR posted_at older than threshold.
   // Implemented as: there must EXIST at least one fresh listing.
@@ -199,12 +164,20 @@ export default defineEventHandler((event) => {
   }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : ''
 
-  const groups = db
+  // Overshoot when noise filtering happens post-fetch so filtering doesn't
+  // shrink the visible list below the requested limit.
+  const sqlLimit = hideNoise ? Math.min(limit * 2, 1000) : limit
+
+  const rawGroups = db
     .prepare<unknown[], GroupRow>(
       `SELECT g.* FROM job_groups g ${whereSql}
-       ORDER BY g.updated_at DESC LIMIT ${limit}`,
+       ORDER BY g.updated_at DESC LIMIT ${sqlLimit}`,
     )
     .all(...params)
+
+  const groups = hideNoise
+    ? rawGroups.filter((g) => !isNoiseTitle(g.canonical_title)).slice(0, limit)
+    : rawGroups
 
   if (groups.length === 0) return { groups: [] as GroupDto[] }
 
@@ -213,10 +186,17 @@ export default defineEventHandler((event) => {
 
   // Pull listings with computed stale flags. We compute two separate signals
   // so the UI can show "knikło z portalu" vs "wygasło z czasu".
+  // Explicit column list (no `l.*`) so we skip the huge `description` column,
+  // which is never displayed in the card list — cuts JSON payload by 5-10× on
+  // portals like NoFluffJobs and Bulldogjob where descriptions are multi-KB.
   const listings = db
-    .prepare<unknown[], ListingRowWithStale>(
+    .prepare<unknown[], ListingRowSlim>(
       `SELECT
-         l.*,
+         l.id, l.source, l.source_id, l.url, l.title, l.company, l.location, l.remote,
+         l.salary_min, l.salary_max, l.currency, l.salary_period, l.contract_type, l.experience,
+         l.skills_json,
+         l.has_vue, l.has_react, l.has_angular, l.has_svelte, l.vue_in_title, l.vue_relevance,
+         l.posted_at, l.first_seen_at, l.last_seen_at, l.group_id,
          CASE WHEN l.last_seen_at < datetime('now', '-' || ? || ' days') THEN 1 ELSE 0 END AS is_stale_unseen,
          CASE WHEN l.posted_at IS NOT NULL AND l.posted_at < datetime('now', '-' || ? || ' days') THEN 1 ELSE 0 END AS is_stale_aged
        FROM job_listings l
@@ -225,7 +205,7 @@ export default defineEventHandler((event) => {
     )
     .all(lastSeenDays, postedDays, ...ids)
 
-  const byGroup = new Map<number, ListingRowWithStale[]>()
+  const byGroup = new Map<number, ListingRowSlim[]>()
   for (const l of listings) {
     if (l.group_id == null) continue
     if (!byGroup.has(l.group_id)) byGroup.set(l.group_id, [])

@@ -15,8 +15,6 @@ const SOURCE_LABEL: Record<string, string> = {
   linkedin: 'LI',
   indeed: 'Indeed',
   remotive: 'Remotive',
-  crossweb: 'Crossweb',
-  pracapl: 'praca.pl',
 }
 
 function fmtSalary(g: GroupDto) {

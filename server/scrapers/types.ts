@@ -48,6 +48,11 @@ export interface JobScraper {
     needsBrowser: boolean
     supportsKeywordFilter: boolean
   }
+  // Minimum minutes between cron-driven runs of this scraper. Undefined = use
+  // the global SCRAPE_INTERVAL_MINUTES. Slow / rate-limited portals set this
+  // higher so the cron tick skips them until enough time has passed. Manual
+  // "Scrape now" from the UI always runs everything regardless.
+  cronIntervalMinutes?: number
   scrape(ctx: ScrapeContext): Promise<ScrapeResult>
 }
 

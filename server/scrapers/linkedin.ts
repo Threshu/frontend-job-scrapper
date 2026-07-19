@@ -118,6 +118,9 @@ export const linkedinScraper: JobScraper = {
   source: 'linkedin',
   displayName: 'LinkedIn',
   capabilities: { needsBrowser: false, supportsKeywordFilter: true },
+  // Rate-limit-sensitive and slow (5+ min per full run). Running every hour is
+  // plenty for a job board — LinkedIn doesn't publish faster than that.
+  cronIntervalMinutes: 60,
 
   async scrape(ctx: ScrapeContext): Promise<ScrapeResult> {
     const errors: string[] = []

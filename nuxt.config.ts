@@ -13,10 +13,6 @@ export default defineNuxtConfig({
     scrapeIntervalMinutes: Number(process.env.SCRAPE_INTERVAL_MINUTES || 30),
     staleLastSeenDays: Number(process.env.STALE_LAST_SEEN_DAYS || 7),
     stalePostedDays: Number(process.env.STALE_POSTED_DAYS || 60),
-    smtpHost: process.env.SMTP_HOST || '',
-    smtpUser: process.env.SMTP_USER || '',
-    smtpPass: process.env.SMTP_PASS || '',
-    notifyEmail: process.env.NOTIFY_EMAIL || '',
     public: {
       staleLastSeenDays: Number(process.env.STALE_LAST_SEEN_DAYS || 7),
       stalePostedDays: Number(process.env.STALE_POSTED_DAYS || 60),
