@@ -99,7 +99,7 @@ function placeCity(p: NfjPosting): string | undefined {
   return p.location?.places?.find((x) => x.city)?.city
 }
 
-function detailToRaw(d: NfjDetail): RawJob {
+function detailToRaw(d: NfjDetail, fallbackSlug?: string): RawJob {
   const company = d.company?.name ?? ''
   const description = [
     d.details?.position ?? '',
@@ -111,12 +111,12 @@ function detailToRaw(d: NfjDetail): RawJob {
     ...(d.requirements?.nices ?? []).map((m) => m.value),
   ]
   const sal = d.essentials?.originalSalary
-  const slug = d.postingUrl || d.defaultUrl || d.id
+  const slug = d.postingUrl || d.defaultUrl || d.id || fallbackSlug || ''
   return {
     source: 'nofluffjobs',
     sourceId: slug,
     url: `https://nofluffjobs.com/job/${slug}`,
-    title: d.title,
+    title: d.title ?? '',
     company,
     location: d.location?.places?.find((x) => x.city)?.city,
     remote: !!d.location?.places?.some((x) => /remote|zdaln/i.test(x.city ?? '')),
@@ -142,10 +142,10 @@ function listingToRaw(p: NfjPosting): RawJob {
   ].filter(Boolean) as string[]
   return {
     source: 'nofluffjobs',
-    sourceId: p.url,
-    url: `https://nofluffjobs.com/job/${p.url}`,
-    title: p.title,
-    company: p.name,
+    sourceId: p.url ?? '',
+    url: `https://nofluffjobs.com/job/${p.url ?? ''}`,
+    title: p.title ?? '',
+    company: p.name ?? '',
     location: placeCity(p),
     remote: !!p.fullyRemote,
     salaryMin: p.salary?.from,
@@ -226,6 +226,7 @@ export const nofluffjobsScraper: JobScraper = {
         continue
       }
       for (const p of postings) {
+        if (!p.url) continue
         if (seen.has(p.url)) continue
         seen.add(p.url)
         queue.push(p)
@@ -240,7 +241,7 @@ export const nofluffjobsScraper: JobScraper = {
       try {
         const detail = await fetchDetail(p.url, ctx.signal)
         if (detail.status?.active === false) return null
-        return detailToRaw(detail)
+        return detailToRaw(detail, p.url)
       } catch (e) {
         errors.push(`detail ${p.url}: ${fmtErr(e)}`)
         return listingToRaw(p)

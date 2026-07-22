@@ -44,7 +44,8 @@ interface CardRaw {
 
 async function fetchSearchPage(keyword: string, start: number, uaIdx: number, signal?: AbortSignal): Promise<string> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(keyword)}&location=${encodeURIComponent(LOCATION)}&start=${start}`
-  const res = await fetch(url, { headers: headersFor(uaIdx), signal })
+  const res = await fetch(url, { headers: headersFor(uaIdx), signal: withTimeout(REQUEST_TIMEOUT_MS, signal) })
+  if (res.status === 429) throw Object.assign(new Error(`LI search ${keyword} start=${start} → HTTP 429`), { is429: true })
   if (!res.ok) throw new Error(`LI search ${keyword} start=${start} → HTTP ${res.status}`)
   return res.text()
 }
@@ -78,7 +79,7 @@ function parseSearchCards(html: string): CardRaw[] {
 // Returns null when the posting is closed or gone (404 / "no longer accepting applications").
 async function fetchDetailDescription(jobId: string, uaIdx: number, signal?: AbortSignal): Promise<string | null> {
   const url = `https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/${jobId}`
-  const res = await fetch(url, { headers: headersFor(uaIdx), signal })
+  const res = await fetch(url, { headers: headersFor(uaIdx), signal: withTimeout(REQUEST_TIMEOUT_MS, signal) })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`LI detail ${jobId} → HTTP ${res.status}`)
   const html = await res.text()
@@ -107,11 +108,27 @@ function buildRawJob(card: CardRaw, description: string): RawJob {
   }
 }
 
-const LIST_DELAY_MS = 350     // between search-page fetches (no 429 observed here)
+const LIST_DELAY_MS = 700     // between search-page fetches
+const KEYWORD_DELAY_MS = 10_000  // between keyword switches — avoids 429 burst at keyword boundary
+const SEARCH_429_BACKOFF_MS = 22_000  // back-off before one retry when search page returns 429
 const DETAIL_DELAY_MS = 800   // between detail fetches (429 happens here)
+const REQUEST_TIMEOUT_MS = 20_000
+// When this many consecutive detail fetches fail with a connection error
+// (ECONNRESET / ECONNREFUSED / timeout), LinkedIn is blocking us for this run;
+// stop fetching details and save the remaining cards without descriptions.
+const MAX_CONSECUTIVE_CONN_ERRORS = 5
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+// Returns a signal that aborts after `ms` milliseconds, respecting the parent
+// signal too. Works on Node 18+ (AbortSignal.timeout is Node 17.3+).
+function withTimeout(ms: number, parent?: AbortSignal): AbortSignal {
+  const ctrl = new AbortController()
+  const id = setTimeout(() => ctrl.abort(new Error(`timeout after ${ms}ms`)), ms)
+  parent?.addEventListener('abort', () => { clearTimeout(id); ctrl.abort(parent.reason) }, { once: true })
+  return ctrl.signal
 }
 
 export const linkedinScraper: JobScraper = {
@@ -131,29 +148,40 @@ export const linkedinScraper: JobScraper = {
 
     for (let kwIdx = 0; kwIdx < KEYWORDS.length; kwIdx++) {
       const kw = KEYWORDS[kwIdx]
+      if (kwIdx > 0) await sleep(KEYWORD_DELAY_MS)   // cool down between keywords
       let start = 0
       let consecutiveEmpty = 0
       while (start < MAX_CARDS_PER_KEYWORD) {
-        let page: CardRaw[]
+        let page: CardRaw[] | null = null
         try {
-          const html = await fetchSearchPage(kw, start, kwIdx, ctx.signal)
-          page = parseSearchCards(html)
+          page = parseSearchCards(await fetchSearchPage(kw, start, kwIdx, ctx.signal))
         } catch (e) {
-          errors.push(`search "${kw}" start=${start}: ${fmtErr(e)}`)
-          break
+          const err = e as Error & { is429?: boolean }
+          if (err.is429) {
+            // Back off and retry once with a fresh UA before giving up on this keyword
+            await sleep(SEARCH_429_BACKOFF_MS)
+            try {
+              page = parseSearchCards(await fetchSearchPage(kw, start, kwIdx + 1, ctx.signal))
+            } catch (e2) {
+              errors.push(`search "${kw}" start=${start}: ${fmtErr(e2)}`)
+              break
+            }
+          } else {
+            errors.push(`search "${kw}" start=${start}: ${fmtErr(e)}`)
+            break
+          }
         }
-        if (!page.length) {
+        if (!page || !page.length) {
           consecutiveEmpty++
           // First page empty often means LinkedIn returned a soft-throttle. Retry
           // once with a different UA after a longer sleep before giving up.
           if (start === 0 && consecutiveEmpty === 1) {
             await sleep(LIST_DELAY_MS * 6)
             try {
-              const html2 = await fetchSearchPage(kw, start, kwIdx + 1, ctx.signal)
-              page = parseSearchCards(html2)
+              page = parseSearchCards(await fetchSearchPage(kw, start, kwIdx + 1, ctx.signal))
             } catch {}
           }
-          if (!page.length) break
+          if (!page || !page.length) break
           consecutiveEmpty = 0
         }
         for (const c of page) {
@@ -166,15 +194,28 @@ export const linkedinScraper: JobScraper = {
       }
     }
 
+    let consecutiveConnErrors = 0
     for (let i = 0; i < cards.length; i++) {
       const c = cards[i]
       try {
         const desc = await fetchDetailDescription(c.id, i, ctx.signal)
+        consecutiveConnErrors = 0
         if (desc === null) { closedIds.push(c.id); continue }
         jobs.push(buildRawJob(c, desc))
       } catch (e) {
-        // 429 rate-limit on detail — save card without description rather than discarding it
         const msg = (e as Error).message
+        const isConnError = /ECONNRESET|ECONNREFUSED|ETIMEDOUT|timeout/i.test(msg)
+        if (isConnError) {
+          consecutiveConnErrors++
+          if (consecutiveConnErrors >= MAX_CONSECUTIVE_CONN_ERRORS) {
+            errors.push(`detail fetches blocked after ${consecutiveConnErrors} consecutive connection errors — saving remaining ${cards.length - i} cards without descriptions`)
+            for (let j = i; j < cards.length; j++) jobs.push(buildRawJob(cards[j], ''))
+            break
+          }
+        } else {
+          consecutiveConnErrors = 0
+        }
+        // 429 rate-limit on detail — save card without description rather than discarding it
         if (!msg.includes('429')) errors.push(`detail ${c.id}: ${fmtErr(e)}`)
         jobs.push(buildRawJob(c, ''))
       }

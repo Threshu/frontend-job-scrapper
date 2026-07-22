@@ -128,7 +128,11 @@
       "Bash(grep -v \".map$\")",
       "WebFetch(domain:jsremotely.com)",
       "WebFetch(domain:weworkremotely.com)",
-      "WebFetch(domain:javascript.jobs)"
+      "WebFetch(domain:javascript.jobs)",
+      "Bash(Start-Sleep -Seconds 5)",
+      "Bash(Get-Content \"C:\\\\Users\\\\sbanach\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Projects-frontend-job-scrapper\\\\6e3a456a-d01c-4cee-a6f0-7e9787a2bd16\\\\tasks\\\\b4xa0fx3t.output\")",
+      "Bash(Select-Object -Last 40)",
+      "Bash(npm rebuild *)"
     ]
   }
 }

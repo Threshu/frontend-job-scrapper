@@ -88,9 +88,17 @@ async function runOne(
     result.errors.push(...out.errors)
     const insert = db.transaction((jobs: typeof out.jobs) => {
       for (const j of jobs) {
-        const r = upsertListing(j, db)
-        if (r.isNewListing) result.newListings++
-        if (r.isNewGroup) result.newGroups++
+        if (!j.sourceId) {
+          result.errors.push(`skipped listing with no sourceId: "${j.title}" @ ${j.company}`)
+          continue
+        }
+        try {
+          const r = upsertListing(j, db)
+          if (r.isNewListing) result.newListings++
+          if (r.isNewGroup) result.newGroups++
+        } catch (e) {
+          result.errors.push(`upsert ${j.sourceId}: ${(e as Error).message}`)
+        }
       }
     })
     insert(out.jobs)

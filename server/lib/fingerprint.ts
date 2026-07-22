@@ -39,6 +39,7 @@ function squashWhitespace(s: string): string {
 }
 
 export function normalizeCompany(raw: string): string {
+  if (!raw) return ''
   let s = raw.toLowerCase()
   for (const re of COMPANY_SUFFIXES) s = s.replace(re, ' ')
   // Strip pipe too — it's the fingerprint separator, so a company name
@@ -49,6 +50,7 @@ export function normalizeCompany(raw: string): string {
 }
 
 export function normalizeTitle(raw: string): string {
+  if (!raw) return ''
   let s = raw.toLowerCase()
   for (const re of TITLE_NOISE) s = s.replace(re, ' ')
   // strip leading/trailing seniority qualifiers
